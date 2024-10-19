@@ -14,15 +14,8 @@ Restore PayPal Standard For WooCommerce enables PayPal Standard as payment metho
 
 == Description ==
 
-Restore PayPal Standard For WooCommerce restores <a href="https://www.paypal.com/us/smarthelp/article/what-is-paypal-payments-standard-and-how-does-it-work-faq3700">PayPal Standard</a> for <a href="https://wordpress.org/plugins/woocommerce/">WooCommerce</a>.
+Restore PayPal Standard For WooCommerce enables PayPal Standard as payment method for <a href="https://wordpress.org/plugins/woocommerce/">WooCommerce</a>.
 
-Since WooCommerce 5.5 PayPal Standard is not enabled, <a href="https://wordpress.org/plugins/woocommerce/">WooCommerce</a> suggests the plugin <a href="https://wordpress.org/plugins/woocommerce-paypal-payments/">WooCommerce PayPal Payments</a>.
-
-Unfortunately, <a href="https://wordpress.org/plugins/woocommerce-paypal-payments/">WooCommerce PayPal Payments</a> still gives some problems, and it still doesn’t look really mature.
-
-If you only need PayPal Standard as a payment method, we suggest using Restore PayPal Standard For WooCommerce until WooCommerce PayPal Payments is stable.
-
-After activation, you will have again PayPal Standard as it was before WooCommerce 5.5.
 
 
 == HOW TO ENABLE PAYPAL STANDARD AS PAYMENT METHOD FOR WOOCOMMERCE ==
