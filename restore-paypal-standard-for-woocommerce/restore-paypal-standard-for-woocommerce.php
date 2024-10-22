@@ -6,9 +6,9 @@
 *Author URI: https://josemortellaro.com/
 *Domain Path: /languages/
 *Text Domain: restore-paypal-standard-for-woocommerce
-*Version: 1.0.4
+*Version: 1.0.5
 *WC requires at least: 6.0
-*WC tested up to: 9.1.4
+*WC tested up to: 9.4.0
 *Requires Plugins: woocommerce
 */
 
@@ -22,6 +22,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 defined( 'ABSPATH' ) || exit; // Exit if accessed directly
+
+define( 'EOS_RPSFW_PLUGIN_URL', untrailingslashit( plugins_url( '', __FILE__ ) ) );
 
 $plugin = untrailingslashit( plugin_basename( __FILE__ ) );
 
@@ -44,13 +46,13 @@ function eos_psfw_plugin_links( $links ){
     $settings_link = ' <a style="color:red" href="#">' . esc_html__( 'WooCommerce not active!','restore-paypal-standard-for-woocommerce' ). '</a>';
   }
   array_push( $links, $settings_link );
+  $settings_link = ' <a style="color:red;font-weight:bold" href="https://shop.josemortellaro.com/downloads/restore-paypal-standard-for-woocommerce/" target="_blank" rel="noopener">' . esc_html__( 'VERY IMPORTANT!','restore-paypal-standard-for-woocommerce' ). '</a>';
+  array_push( $links, $settings_link );
 	return $links;
 }
 
 if( is_admin() ){
-  if( isset( $_GET['page'] ) && 'wc-settings' === $_GET['page'] ){
-    require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-admin.php';
-  }
+  require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-admin.php';
   if( wp_doing_ajax() ){
     require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-ajax.php';
   }
