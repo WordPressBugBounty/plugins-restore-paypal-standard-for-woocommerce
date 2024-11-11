@@ -6,9 +6,9 @@
 *Author URI: https://josemortellaro.com/
 *Domain Path: /languages/
 *Text Domain: restore-paypal-standard-for-woocommerce
-*Version: 1.0.5
+*Version: 1.0.6
 *WC requires at least: 6.0
-*WC tested up to: 9.4.0
+*WC tested up to: 9.1.4
 *Requires Plugins: woocommerce
 */
 
@@ -23,8 +23,6 @@ GNU General Public License for more details.
 */
 defined( 'ABSPATH' ) || exit; // Exit if accessed directly
 
-define( 'EOS_RPSFW_PLUGIN_URL', untrailingslashit( plugins_url( '', __FILE__ ) ) );
-
 $plugin = untrailingslashit( plugin_basename( __FILE__ ) );
 
 add_action( 'plugins_loaded',function(){
@@ -37,7 +35,7 @@ add_action( 'plugins_loaded',function(){
 } );
 
 add_filter( "plugin_action_links_$plugin",'eos_psfw_plugin_links' );
-//It adds a settings link to the action links in the plugins page
+// It adds a settings link to the action links in the plugins page.
 function eos_psfw_plugin_links( $links ){
   if( class_exists( 'WooCommerce' ) ){
     $settings_link = ' <a href="'.admin_url( 'admin.php?page=wc-settings&tab=checkout&section=paypal' ).'">' . esc_html__( 'Settings','restore-paypal-standard-for-woocommerce' ). '</a>';
@@ -46,14 +44,14 @@ function eos_psfw_plugin_links( $links ){
     $settings_link = ' <a style="color:red" href="#">' . esc_html__( 'WooCommerce not active!','restore-paypal-standard-for-woocommerce' ). '</a>';
   }
   array_push( $links, $settings_link );
-  $settings_link = ' <a style="color:red;font-weight:bold" href="https://shop.josemortellaro.com/downloads/restore-paypal-standard-for-woocommerce/" target="_blank" rel="noopener">' . esc_html__( 'VERY IMPORTANT!','restore-paypal-standard-for-woocommerce' ). '</a>';
-  array_push( $links, $settings_link );
 	return $links;
 }
 
 if( is_admin() ){
-  require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-admin.php';
-  if( wp_doing_ajax() ){
+  if( isset( $_GET['page'] ) && 'wc-settings' === $_GET['page'] ) { // @codingStandardsIgnoreLine. Here we just include the file for the admin only where it's needed. We don't need any nonce verification here.
+    require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-admin.php';
+  }
+  if( wp_doing_ajax() ) {
     require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-ajax.php';
   }
 }
