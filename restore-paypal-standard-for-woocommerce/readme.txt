@@ -3,7 +3,7 @@ Contributors: giuse
 Donate link:
 Tags: PayPal Standard, WooCommerce, PayPal, payment method
 Requires at least: 4.6
-Tested up to: 6.7
+Tested up to: 6.8
 Stable tag: 1.0.6
 Requires PHP: 5.6
 License: GPLv2 or later
