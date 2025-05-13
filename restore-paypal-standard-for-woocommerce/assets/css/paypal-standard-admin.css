@@ -1,0 +1,152 @@
+/**
+ * PayPal Standard Admin Styles
+ */
+
+/* Add spacing below the subsubsub tabs and above the gateway title */
+ul.subsubsub {
+    margin-bottom: 2.5em;
+}
+
+/* Add spacing between title and tabs */
+h2 + ul.subsubsub {
+    margin-top: 1em;
+}
+
+/* Add space after description before tabs */
+.description + ul.subsubsub {
+    margin-top: 1em;
+}
+
+/* Add extra space above section titles */
+.rpsfw-section-title {
+    padding-top: 25px !important;
+}
+
+ul.subsubsub + h2, ul.subsubsub + h3 {
+    display: block;
+    margin-top: 1.5em;
+    clear: both;
+}
+
+/* Tab styling: only minimal margin to match WooCommerce native look */
+.rpsfw-settings-tabs {
+    margin-top: 1em;
+    margin-bottom: 0.5em;
+}
+
+/* Remove any custom .nav-tab styles so the native look is preserved */
+
+/* Hide and show fields based on mode using specificity to override WooCommerce styles */
+.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_email,
+.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_api_username,
+.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_api_password,
+.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_api_signature {
+    display: none !important;
+}
+
+.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_email,
+.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_api_username,
+.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_api_password,
+.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_api_signature {
+    display: none !important;
+}
+
+/* Hide the entire rows - note we're adding specific class names to the rows in JS for older browsers */
+.rpsfw-sandbox-mode.woocommerce-settings-wrap tr.rpsfw-live-field-row {
+    display: none !important;
+}
+
+.rpsfw-live-mode.woocommerce-settings-wrap tr.rpsfw-sandbox-field-row {
+    display: none !important;
+}
+
+/* Mode-based field styling */
+.rpsfw-sandbox-field, .rpsfw-live-field {
+    transition: opacity 0.3s ease-in-out;
+}
+
+.rpsfw-sandbox-mode .rpsfw-live-field,
+.rpsfw-live-mode .rpsfw-sandbox-field {
+    opacity: 0.5;
+}
+
+/* Sandbox help link */
+.rpsfw-sandbox-help {
+    margin-top: 0.5em;
+    font-style: italic;
+}
+
+/* Make the settings form more readable */
+.rpsfw-settings-tabs + .form-table th {
+    padding-top: 20px;
+    padding-bottom: 20px;
+}
+
+.rpsfw-settings-tabs + .form-table td {
+    padding-top: 15px;
+    padding-bottom: 15px;
+}
+
+/* Section titles */
+.rpsfw-settings-tabs + .form-table h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+/* Fix for Select2 elements */
+.rpsfw-settings-tabs + .form-table .select2-container {
+    min-width: 350px;
+}
+
+/* Additional spacing for section titles */
+.form-table tr:first-child th h3 {
+    margin-top: 0;
+}
+
+/* Deactivation Survey Styles */
+#rpsfw-deactivation-survey {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 100000;
+}
+
+.rpsfw-survey-content {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    padding: 20px;
+    border-radius: 5px;
+    max-width: 500px;
+    width: 90%;
+}
+
+.rpsfw-survey-options {
+    margin: 20px 0;
+}
+
+.rpsfw-survey-options label {
+    display: block;
+    margin: 10px 0;
+}
+
+#rpsfw-other-reason textarea {
+    width: 100%;
+    margin: 10px 0;
+}
+
+.rpsfw-survey-buttons {
+    text-align: right;
+    margin-top: 20px;
+}
+
+.rpsfw-survey-buttons button {
+    margin-left: 10px;
+} 

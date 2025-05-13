@@ -1,63 +1,66 @@
 <?php
 /**
-*Plugin Name: Restore Paypal Standard For WooCommerce
-*Description: It enables PayPal Standard for WooCommerce
-*Author: Jose Mortellaro
-*Author URI: https://josemortellaro.com/
-*Domain Path: /languages/
-*Text Domain: restore-paypal-standard-for-woocommerce
-*Version: 1.0.6
-*WC requires at least: 6.0
-*WC tested up to: 9.1.4
-*Requires Plugins: woocommerce
-*/
+ * Plugin Name: Restore Paypal Standard For WooCommerce
+ * Description: Restore PayPal Standard payment gateway for WooCommerce
+ * Version: 3.0
+ * Author: Scott Paterson
+ * Author URI: https://wpplugin.org
+ * Text Domain: restore-paypal-standard-for-woocommerce
+ * Domain Path: /languages
+ * Requires at least: 5.6
+ * Requires PHP: 5.6
+ * WC requires at least: 6.0
+ * WC tested up to: 9
+ * 
+ * Requires Plugins: woocommerce
+ * 
+ * License: GNU General Public License v3.0
+ * License URI: http://www.gnu.org/licenses/gpl-3.0.html
+ */
 
-/*  This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-*/
-defined( 'ABSPATH' ) || exit; // Exit if accessed directly
+defined( 'ABSPATH' ) || exit;
 
-$plugin = untrailingslashit( plugin_basename( __FILE__ ) );
+// Define plugin constants
+define( 'RPSFW_VERSION', '3.0' );
+define( 'RPSFW_PLUGIN_FILE', __FILE__ );
+define( 'RPSFW_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
+define( 'RPSFW_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
-add_action( 'plugins_loaded',function(){
-  // It enable PayPal Standard for WooCommerce.
-  $paypal = class_exists( 'WC_Gateway_Paypal' ) ? new WC_Gateway_Paypal() : null;
-  if( $paypal ) {
-    $paypal->update_option( '_should_load', 'yes' );
-  }
-  add_filter( 'woocommerce_should_load_paypal_standard','__return_true',9999999999999 );
-} );
-
-add_filter( "plugin_action_links_$plugin",'eos_psfw_plugin_links' );
-// It adds a settings link to the action links in the plugins page.
-function eos_psfw_plugin_links( $links ){
-  if( class_exists( 'WooCommerce' ) ){
-    $settings_link = ' <a href="'.admin_url( 'admin.php?page=wc-settings&tab=checkout&section=paypal' ).'">' . esc_html__( 'Settings','restore-paypal-standard-for-woocommerce' ). '</a>';
-  }
-  else{
-    $settings_link = ' <a style="color:red" href="#">' . esc_html__( 'WooCommerce not active!','restore-paypal-standard-for-woocommerce' ). '</a>';
-  }
-  array_push( $links, $settings_link );
-	return $links;
+// PHP version check
+if ( version_compare( PHP_VERSION, '5.6.0', '<' ) ) {
+    add_action( 'admin_notices', 'rpsfw_php_version_notice' );
+    return;
 }
 
-if( is_admin() ){
-  if( isset( $_GET['page'] ) && 'wc-settings' === $_GET['page'] ) { // @codingStandardsIgnoreLine. Here we just include the file for the admin only where it's needed. We don't need any nonce verification here.
-    require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-admin.php';
-  }
-  if( wp_doing_ajax() ) {
-    require_once untrailingslashit( dirname( __FILE__ ) ).'/admin/rpsw-ajax.php';
-  }
-}
+// Include helper functions
+require_once RPSFW_PLUGIN_DIR . 'includes/functions.php';
 
-add_action( 'before_woocommerce_init', function() {
-	if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
-		\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__, true );
-	}
-} );
+// Include migration functionality
+require_once RPSFW_PLUGIN_DIR . 'includes/admin/migration.php';
+
+// Register all hooks
+rpsfw_register_hooks();
+
+// Register activation hook - this cannot be moved to a function
+register_activation_hook( __FILE__, 'rpsfw_activation_hook' );
+
+// Add admin notice
+add_action( 'admin_notices', 'rpsfw_admin_notice', 20 );
+
+// Check if the enable_native_paypal option is set to 'yes'
+$plugin = plugin_basename( __FILE__ );
+$settings = get_option('woocommerce_restore_paypal_standard_settings', array());
+$enable_native_paypal = isset($settings['enable_native_paypal']) && $settings['enable_native_paypal'] === 'yes';
+$migration_complete = 'yes' === get_option( 'rpsfw_migration_completed', 'no' );
+
+// Run if native PayPal is enabled OR migration is not complete
+if ($enable_native_paypal || !$migration_complete) {
+  add_action( 'plugins_loaded',function(){
+    // It enable PayPal Standard for WooCommerce.
+    $paypal = class_exists( 'WC_Gateway_Paypal' ) ? new WC_Gateway_Paypal() : null;
+    if( $paypal ) {
+      $paypal->update_option( '_should_load', 'yes' );
+    }
+    add_filter( 'woocommerce_should_load_paypal_standard','__return_true',9999999999999 );
+  } );
+}

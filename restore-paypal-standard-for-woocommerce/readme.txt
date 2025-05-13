@@ -1,36 +1,48 @@
-=== Restore PayPal Standard For WooCommerce: enable PayPal Standard as a payment method for WooCommerce ===
-Contributors: giuse
-Donate link:
-Tags: PayPal Standard, WooCommerce, PayPal, payment method
-Requires at least: 4.6
+=== Restore PayPal Standard for WooCommerce ===
+Contributors: scottpaterson,wp-plugin
+Tags: woocommerce, paypal, payment gateway, payment, standard
+Requires at least: 5.6
 Tested up to: 6.8
-Stable tag: 1.0.6
 Requires PHP: 5.6
-License: GPLv2 or later
-License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Stable tag: 3.0
+License: GPLv3
+License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
-Restore PayPal Standard For WooCommerce enables PayPal Standard as payment method for <a href="https://wordpress.org/plugins/woocommerce/">WooCommerce</a>.
-
+Re-enables the PayPal Standard payment gateway for WooCommerce.
 
 == Description ==
 
-Restore PayPal Standard For WooCommerce enables PayPal Standard as payment method for <a href="https://wordpress.org/plugins/woocommerce/">WooCommerce</a>.
+Restore PayPal Standard For WooCommerce allows you to use the PayPal Standard gateway as a payment method for <a href="https://wordpress.org/plugins/woocommerce/">WooCommerce</a>.
 
+As of version 3.0, this plugin includes PayPal Standard code, ensuring it continues to work even if WooCommerce removes it entirely in future releases.
 
+Previously, this plugin only re-enabled the menu item while PayPal Standard code was still bundled with WooCommerce. Since WooCommerce has been gradually deprecating PayPal Standard, this plugin offers a reliable way to keep using PayPal Standard in WooCommerce it without disruption.
 
-== HOW TO ENABLE PAYPAL STANDARD AS PAYMENT METHOD FOR WOOCOMMERCE ==
-* Install Restore PayPal Standard For WooCommerce
-* Activate it
-* You will find PayPal Standard as a payment method for WooCommerce
+PayPal has confirmed that they have no current plans to discontinue support for PayPal Standard. 
 
+This plugin is created by an official PayPal Partner. This plugin is not an official WooCommerce add-on or extension and is not affiliate in any way with WooCommerce, WordPress, or Automattic Inc
 
-The settings of PayPal Standard are in WooCommerce => Settings => Payments => PayPal Standard => Manage
+== Frequently Asked Questions ==
 
+= Does this work with the latest version of WooCommerce? =
 
+Yes, this plugin is compatible with the latest version of WooCommerce.
+
+= Can I use this alongside other PayPal payment gateways? =
+
+Yes, you can use this gateway alongside other PayPal gateways like PayPal Commerce Platform or PayPal Express Checkout.
+
+= Where can I get support? =
+
+If you need support, please use the WordPress.org forums for this plugin.
 
 
 == Changelog ==
 
+
+= 3.0 =
+* 4/30/25
+* New - This plugin now has built in PayPal Standard Code! This is very useful, as it seems likely that WooCommerce may eventually remove PayPal Standard from its core code in a future release.
 
 = 1.0.6 =
 * Tested: WooCommerce WordPress 6.7
