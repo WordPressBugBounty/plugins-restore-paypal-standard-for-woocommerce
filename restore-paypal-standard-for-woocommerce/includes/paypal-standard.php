@@ -61,6 +61,48 @@ class rpsfw_Gateway_PayPal_Standard extends WC_Payment_Gateway {
     public $settings_handler;
 
     /**
+     * Test mode flag
+     *
+     * @var bool
+     */
+    public $testmode;
+
+    /**
+     * PayPal email address
+     *
+     * @var string
+     */
+    public $email;
+
+    /**
+     * PayPal identity token
+     *
+     * @var string
+     */
+    public $identity_token;
+
+    /**
+     * Invoice prefix
+     *
+     * @var string
+     */
+    public $invoice_prefix;
+
+    /**
+     * Debug mode flag
+     *
+     * @var bool
+     */
+    public $debug;
+
+    /**
+     * Receiver email address
+     *
+     * @var string
+     */
+    public $receiver_email;
+
+    /**
      * Constructor for the gateway.
      */
     public function __construct() {

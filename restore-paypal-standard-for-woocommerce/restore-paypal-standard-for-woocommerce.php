@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Restore Paypal Standard For WooCommerce
  * Description: Restore PayPal Standard payment gateway for WooCommerce
- * Version: 3.0
+ * Version: 3.0.1
  * Author: Scott Paterson
  * Author URI: https://wpplugin.org
  * Text Domain: restore-paypal-standard-for-woocommerce
@@ -10,7 +10,7 @@
  * Requires at least: 5.6
  * Requires PHP: 5.6
  * WC requires at least: 6.0
- * WC tested up to: 9
+ * WC tested up to: 10
  * 
  * Requires Plugins: woocommerce
  * 
@@ -21,7 +21,7 @@
 defined( 'ABSPATH' ) || exit;
 
 // Define plugin constants
-define( 'RPSFW_VERSION', '3.0' );
+define( 'RPSFW_VERSION', '3.0.1' );
 define( 'RPSFW_PLUGIN_FILE', __FILE__ );
 define( 'RPSFW_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RPSFW_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

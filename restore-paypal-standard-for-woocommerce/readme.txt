@@ -4,7 +4,7 @@ Tags: woocommerce, paypal, payment gateway, payment, standard
 Requires at least: 5.6
 Tested up to: 6.8
 Requires PHP: 5.6
-Stable tag: 3.0
+Stable tag: 3.0.1
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -39,6 +39,9 @@ If you need support, please use the WordPress.org forums for this plugin.
 
 == Changelog ==
 
+= 3.0.1 =
+* 9/22/25
+* Fix - Fixed PHP deprecated warning that occurred with PHP 8.2+.
 
 = 3.0 =
 * 4/30/25
