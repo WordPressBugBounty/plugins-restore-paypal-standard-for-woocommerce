@@ -143,7 +143,7 @@ class rpsfw_Gateway_PayPal_Standard extends WC_Payment_Gateway {
         
         // Add sandbox messaging if in test mode
         if ( $this->testmode ) {
-            $this->description .= ' ' . sprintf( __( 'SANDBOX ENABLED. You can use sandbox testing accounts only. See the %s for more details.', 'restore-paypal-standard-for-woocommerce' ), '<a target="_blank" href="https://wpplugin.org/documentation/sandbox-mode/">' . __( 'PayPal Sandbox Testing Guide', 'restore-paypal-standard-for-woocommerce' ) . '</a>' );
+            $this->description .= '<br><br>' . sprintf( __( 'SANDBOX ENABLED. You can use sandbox testing accounts only. See the %s for more details.', 'restore-paypal-standard-for-woocommerce' ), '<a target="_blank" href="https://wpplugin.org/documentation/sandbox-mode/">' . __( 'PayPal Sandbox Testing Guide', 'restore-paypal-standard-for-woocommerce' ) . '</a>' );
             $this->description  = trim( $this->description );
         }
 
@@ -223,6 +223,40 @@ class rpsfw_Gateway_PayPal_Standard extends WC_Payment_Gateway {
      */
     public function is_valid_for_use() {
         return $this->settings_handler->is_valid_for_use();
+    }
+    
+    /**
+     * Check if gateway is available for use.
+     *
+     * @return bool
+     */
+    public function is_available() {
+        // Check if native PayPal is enabled - if so, hide this gateway at checkout
+        // Use wp_cache_get to bypass object caching
+        wp_cache_delete('woocommerce_restore_paypal_standard_settings', 'options');
+        $settings = get_option('woocommerce_restore_paypal_standard_settings', array());
+        $enable_native_paypal = isset($settings['enable_native_paypal']) && $settings['enable_native_paypal'] === 'yes';
+        
+        if ($enable_native_paypal && !is_admin()) {
+            return false;
+        }
+        
+        $is_available = parent::is_available();
+        
+        if (!$is_available) {
+            return false;
+        }
+        
+        if (!$this->is_valid_for_use()) {
+            return false;
+        }
+        
+        // Check if email is configured
+        if (empty($this->email)) {
+            return false;
+        }
+        
+        return true;
     }
 
     /**
@@ -487,6 +521,22 @@ class rpsfw_Gateway_PayPal_Standard extends WC_Payment_Gateway {
      */
     public function get_icon() {
         return $this->settings_handler->get_icon();
+    }
+    
+    /**
+     * Get the title for the payment method.
+     * Returns empty string on frontend so only icon shows.
+     *
+     * @return string
+     */
+    public function get_title() {
+        // Return empty string on frontend (checkout) so only icon displays
+        if ( ! is_admin() ) {
+            return '';
+        }
+        
+        // Return title in admin
+        return parent::get_title();
     }
 
     /**

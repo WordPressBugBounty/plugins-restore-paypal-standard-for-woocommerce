@@ -96,6 +96,7 @@ function rpsfw_declare_hpos_compatibility() {
  */
 function rpsfw_add_paypal_gateway( $gateways ) {
     rpsfw_debug_log('rpsfw: Adding gateway to WooCommerce payment gateways filter');
+    rpsfw_debug_log('rpsfw: Current gateways count: ' . count($gateways));
     
     // Include the gateway class if it's not already loaded
     if ( ! class_exists( 'rpsfw_Gateway_PayPal_Standard' ) ) {
@@ -106,12 +107,15 @@ function rpsfw_add_paypal_gateway( $gateways ) {
         
         // Then load the main gateway class
         require_once RPSFW_PLUGIN_DIR . 'includes/paypal-standard.php';
+        rpsfw_debug_log('rpsfw: Gateway class loaded');
+    } else {
+        rpsfw_debug_log('rpsfw: Gateway class already exists');
     }
     
     // Add our gateway to the list
     $gateways[] = 'rpsfw_Gateway_PayPal_Standard';
     
-    rpsfw_debug_log('rpsfw: Added gateway to gateways array');
+    rpsfw_debug_log('rpsfw: Added gateway to gateways array. New count: ' . count($gateways));
     return $gateways;
 }
 
@@ -285,6 +289,8 @@ function rpsfw_register_hooks() {
  * @return array Filtered payment gateways
  */
 function rpsfw_filter_payment_gateways( $gateways ) {
+    rpsfw_debug_log('rpsfw: Filter payment gateways called - Total gateways: ' . count($gateways));
+    
     // Check if migration is complete - we only hide our PayPal gateway if migration is needed
     $migration_complete = 'yes' === get_option( 'rpsfw_migration_completed', 'no' );
     $has_native_settings = function_exists( 'rpsfw_has_native_paypal_settings' ) && rpsfw_has_native_paypal_settings();
@@ -295,11 +301,9 @@ function rpsfw_filter_payment_gateways( $gateways ) {
     // Check if native PayPal is enabled via our debugging option
     $enable_native_paypal = isset($settings['enable_native_paypal']) && $settings['enable_native_paypal'] === 'yes';
     
-    if (function_exists('rpsfw_debug_log')) {
-        rpsfw_debug_log('rpsfw: Filter payment gateways - migration_complete: ' . ($migration_complete ? 'yes' : 'no'));
-        rpsfw_debug_log('rpsfw: Filter payment gateways - has_native_settings: ' . ($has_native_settings ? 'yes' : 'no'));
-        rpsfw_debug_log('rpsfw: Filter payment gateways - enable_native_paypal: ' . ($enable_native_paypal ? 'yes' : 'no'));
-    }
+    rpsfw_debug_log('rpsfw: Filter payment gateways - migration_complete: ' . ($migration_complete ? 'yes' : 'no'));
+    rpsfw_debug_log('rpsfw: Filter payment gateways - has_native_settings: ' . ($has_native_settings ? 'yes' : 'no'));
+    rpsfw_debug_log('rpsfw: Filter payment gateways - enable_native_paypal: ' . ($enable_native_paypal ? 'yes' : 'no'));
     
     // Hide our gateway if migration is needed but not completed
     if ($has_native_settings && !$migration_complete) {
@@ -314,11 +318,11 @@ function rpsfw_filter_payment_gateways( $gateways ) {
             return !in_array($gateway, $our_paypal_gateways);
         });
         
-        if (function_exists('rpsfw_debug_log')) {
-            rpsfw_debug_log('rpsfw: Hiding our gateway until migration is completed');
-        }
-    } else if ($migration_complete && !$enable_native_paypal) {
-        // If migration is completed and native PayPal is not enabled, hide the native WooCommerce PayPal gateway
+        rpsfw_debug_log('rpsfw: Hiding our gateway until migration is completed');
+        rpsfw_debug_log('rpsfw: Remaining gateways after filter: ' . count($gateways));
+    } 
+    // If migration is completed and native PayPal is not enabled, hide the native WooCommerce PayPal gateway
+    else if ($migration_complete && !$enable_native_paypal) {
         // Native WooCommerce PayPal gateway class name
         $native_paypal_gateway = 'WC_Gateway_Paypal';
         
@@ -328,13 +332,12 @@ function rpsfw_filter_payment_gateways( $gateways ) {
             return $gateway !== $native_paypal_gateway;
         });
         
-        if (function_exists('rpsfw_debug_log')) {
-            rpsfw_debug_log('rpsfw: Hiding native WooCommerce PayPal gateway after migration');
-        }
+        rpsfw_debug_log('rpsfw: Hiding native WooCommerce PayPal gateway after migration');
+        rpsfw_debug_log('rpsfw: Remaining gateways after filter: ' . count($gateways));
     } else if ($enable_native_paypal) {
-        if (function_exists('rpsfw_debug_log')) {
-            rpsfw_debug_log('rpsfw: Native PayPal gateway enabled via debug option');
-        }
+        rpsfw_debug_log('rpsfw: Native PayPal gateway enabled via debug option');
+    } else {
+        rpsfw_debug_log('rpsfw: No gateway filtering applied');
     }
     
     return $gateways;

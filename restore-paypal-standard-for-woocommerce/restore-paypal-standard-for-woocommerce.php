@@ -2,9 +2,10 @@
 /**
  * Plugin Name: Restore Paypal Standard For WooCommerce
  * Description: Restore PayPal Standard payment gateway for WooCommerce
- * Version: 3.0.1
+ * Version: 3.1.0
  * Author: Scott Paterson
  * Author URI: https://wpplugin.org
+ * Plugin URI: https://wpplugin.org
  * Text Domain: restore-paypal-standard-for-woocommerce
  * Domain Path: /languages
  * Requires at least: 5.6
@@ -21,7 +22,7 @@
 defined( 'ABSPATH' ) || exit;
 
 // Define plugin constants
-define( 'RPSFW_VERSION', '3.0.1' );
+define( 'RPSFW_VERSION', '3.1.0' );
 define( 'RPSFW_PLUGIN_FILE', __FILE__ );
 define( 'RPSFW_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RPSFW_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -37,6 +38,12 @@ require_once RPSFW_PLUGIN_DIR . 'includes/functions.php';
 
 // Include migration functionality
 require_once RPSFW_PLUGIN_DIR . 'includes/admin/migration.php';
+
+// Include diagnostics
+require_once RPSFW_PLUGIN_DIR . 'includes/diagnostics.php';
+
+// Include blocks support
+require_once RPSFW_PLUGIN_DIR . 'includes/blocks-support.php';
 
 // Register all hooks
 rpsfw_register_hooks();
@@ -63,4 +70,12 @@ if ($enable_native_paypal || !$migration_complete) {
     }
     add_filter( 'woocommerce_should_load_paypal_standard','__return_true',9999999999999 );
   } );
+} else {
+  // Ensure native PayPal is disabled after migration
+  add_action( 'plugins_loaded', function() {
+    if (class_exists( 'WC_Gateway_Paypal' )) {
+      $paypal = new WC_Gateway_Paypal();
+      $paypal->update_option( '_should_load', 'no' );
+    }
+  }, 5 );
 }

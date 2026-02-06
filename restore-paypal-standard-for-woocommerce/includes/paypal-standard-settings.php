@@ -204,12 +204,12 @@ class rpsfw_Gateway_PayPal_Standard_Settings {
         // Check if a custom image URL is set
         $custom_image_url = $this->get_option('image_url');
         
-        // Use custom image URL if provided, otherwise use the default
+        // Use custom image URL if provided, otherwise use the PayPal logo
         $icon_url = !empty($custom_image_url) ? 
             $custom_image_url : 
-            plugins_url( 'assets/images/paypal-cards.jpg', RPSFW_PLUGIN_FILE );
+            plugins_url( 'assets/images/paypal-logo.png', RPSFW_PLUGIN_FILE );
             
-        $icon = '<img src="' . esc_attr( $icon_url ) . '" alt="' . esc_attr__( 'PayPal acceptance mark', 'restore-paypal-standard-for-woocommerce' ) . '" style="width:150px;" />';
+        $icon = '<img src="' . esc_attr( $icon_url ) . '" alt="' . esc_attr__( 'PayPal', 'restore-paypal-standard-for-woocommerce' ) . '" style="height:24px;width:auto;" />';
         
         return apply_filters( 'woocommerce_gateway_icon', $icon, $this->gateway->id );
     }
