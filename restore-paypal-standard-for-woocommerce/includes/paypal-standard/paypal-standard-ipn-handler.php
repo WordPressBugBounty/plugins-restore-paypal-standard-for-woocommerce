@@ -175,7 +175,7 @@ class rpsfw_Gateway_PayPal_Standard_IPN_Handler extends rpsfw_Gateway_PayPal_Sta
     }
 
     /**
-     * Check receiver email from PayPal. If the receiver email in the IPN is different than what is stored in our settings, process order but add a note.
+     * Check receiver email from PayPal. If the receiver email in the IPN is different than what is stored in our settings, the payment was not made to this store's PayPal account, so put the order on-hold and stop - exactly as the currency and amount checks above do.
      *
      * @param WC_Order $order          Order object.
      * @param string   $receiver_email Email to validate.
@@ -183,13 +183,12 @@ class rpsfw_Gateway_PayPal_Standard_IPN_Handler extends rpsfw_Gateway_PayPal_Sta
     protected function validate_receiver_email( $order, $receiver_email ) {
         if ( strcasecmp( trim( $receiver_email ), trim( $this->receiver_email ) ) !== 0 ) {
             rpsfw_Gateway_PayPal_Standard::log( 'IPN Response: Receiver email mismatch - ' . $receiver_email . ' vs ' . $this->receiver_email );
-            
+
             /* translators: %s: receiver email */
             $order->update_status('on-hold', sprintf(__('Validation error: PayPal IPN response from a different email address (%s).', 'restore-paypal-standard-for-woocommerce'), $receiver_email));
-            
-            return false;
+
+            exit;
         }
-        return true;
     }
 
     /**
@@ -223,6 +222,7 @@ class rpsfw_Gateway_PayPal_Standard_IPN_Handler extends rpsfw_Gateway_PayPal_Sta
                 $order->save();
             }
         } else {
+            /* translators: %s: pending reason. */
             $this->payment_on_hold( $order, sprintf( __( 'Payment pending: %s', 'restore-paypal-standard-for-woocommerce' ), $posted['pending_reason'] ) );
         }
     }
@@ -244,6 +244,7 @@ class rpsfw_Gateway_PayPal_Standard_IPN_Handler extends rpsfw_Gateway_PayPal_Sta
      * @param array    $posted Posted data.
      */
     protected function payment_status_failed( $order, $posted ) {
+        /* translators: %s: payment status. */
         $order->update_status( 'failed', sprintf( __( 'Payment failed via IPN. Status: %s.', 'restore-paypal-standard-for-woocommerce' ), $posted['payment_status'] ) );
     }
 

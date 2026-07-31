@@ -259,7 +259,7 @@ class rpsfw_Gateway_PayPal_Standard_Settings {
                 foreach ($sub_sections as $id => $label) {
                     $url = admin_url('admin.php?page=wc-settings&tab=checkout&section=restore_paypal_standard&sub_section=' . $id);
                     $class = ($current_sub_section === $id) ? 'current' : '';
-                    echo '<li><a href="' . esc_url($url) . '" class="' . $class . '">' . esc_html($label) . '</a>';
+                    echo '<li><a href="' . esc_url($url) . '" class="' . esc_attr($class) . '">' . esc_html($label) . '</a>';
                     if (++$i < $total) {
                         echo ' | ';
                     }
@@ -268,8 +268,13 @@ class rpsfw_Gateway_PayPal_Standard_Settings {
                 echo '</ul>';
             }
             
-            // Output the settings, but skip the title as we've already displayed it
-            echo '<table class="form-table">' . $this->gateway->generate_settings_html( $this->gateway->get_form_fields(), false ) . '</table>';
+            // Output the settings, but skip the title as we've already displayed it.
+            // generate_settings_html() echoes the markup itself when its second argument is true,
+            // which keeps the unescaped output inside WooCommerce rather than here - the fields
+            // contain form markup that an escaping function would strip.
+            echo '<table class="form-table">';
+            $this->gateway->generate_settings_html( $this->gateway->get_form_fields(), true );
+            echo '</table>';
         } else {
             ?>
             <div class="inline error">

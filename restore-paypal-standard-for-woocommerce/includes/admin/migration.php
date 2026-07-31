@@ -309,7 +309,7 @@ function rpsfw_render_migration_notice( $notice_count ) {
                 url: ajaxurl,
                 data: {
                     action: 'rpsfw_dismiss_migration_notice',
-                    nonce: '<?php echo wp_create_nonce( 'rpsfw_dismiss_migration_notice' ); ?>',
+                    nonce: '<?php echo esc_js( wp_create_nonce( 'rpsfw_dismiss_migration_notice' ) ); ?>',
                     notice_count: <?php echo esc_js( $notice_count ); ?>
                 }
             });
@@ -327,7 +327,7 @@ function rpsfw_handle_dismiss_migration_notice() {
     if ( ! isset( $_REQUEST['nonce'] ) || ! wp_verify_nonce( $_REQUEST['nonce'], 'rpsfw_dismiss_migration_notice' ) ) {
         wp_die( '', '', array( 'response' => 403 ) );
     }
-    
+
     // Get the notice count from the AJAX request
     $notice_count = isset( $_REQUEST['notice_count'] ) ? intval( $_REQUEST['notice_count'] ) : 0;
     
@@ -354,7 +354,7 @@ function rpsfw_handle_permanent_dismiss_migration_notice() {
         if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( $_GET['rpsfw_nonce'], 'rpsfw_dismiss_migration_notice_permanently' ) ) {
             wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
         }
-        
+
         // Mark notice as permanently dismissed
         update_option( 'rpsfw_migration_notice_dismissed_permanently', 'yes' );
         
@@ -396,7 +396,7 @@ function rpsfw_handle_migration_action() {
         if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( $_GET['rpsfw_nonce'], 'rpsfw_migrate_paypal' ) ) {
             wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
         }
-        
+
         // Run the migration
         rpsfw_migrate_native_paypal_settings();
         
@@ -416,7 +416,7 @@ function rpsfw_handle_show_migration_action() {
         if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( $_GET['rpsfw_nonce'], 'rpsfw_show_migration' ) ) {
             wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
         }
-        
+
         // Reset dismissal options to force showing the notice
         delete_option( 'rpsfw_migration_notice_dismissed_until' );
         delete_option( 'rpsfw_migration_notice_dismissed_permanently' );

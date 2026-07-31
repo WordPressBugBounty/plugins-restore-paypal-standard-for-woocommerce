@@ -143,6 +143,7 @@ class rpsfw_Gateway_PayPal_Standard extends WC_Payment_Gateway {
         
         // Add sandbox messaging if in test mode
         if ( $this->testmode ) {
+            /* translators: %s: link to the PayPal Sandbox Testing Guide. */
             $this->description .= '<br><br>' . sprintf( __( 'SANDBOX ENABLED. You can use sandbox testing accounts only. See the %s for more details.', 'restore-paypal-standard-for-woocommerce' ), '<a target="_blank" href="https://wpplugin.org/documentation/sandbox-mode/">' . __( 'PayPal Sandbox Testing Guide', 'restore-paypal-standard-for-woocommerce' ) . '</a>' );
             $this->description  = trim( $this->description );
         }
@@ -404,6 +405,7 @@ class rpsfw_Gateway_PayPal_Standard extends WC_Payment_Gateway {
             case 'success':
             case 'successwithwarning':
                 $order->add_order_note(
+                    /* translators: %1$s: refunded amount, %2$s: PayPal refund transaction ID. */
                     sprintf( __( 'Refunded %1$s - Refund ID: %2$s', 'restore-paypal-standard-for-woocommerce' ), $result['GROSSREFUNDAMT'], $result['REFUNDTRANSACTIONID'] )
                 );
                 return true;

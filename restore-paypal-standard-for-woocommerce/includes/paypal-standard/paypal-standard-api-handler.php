@@ -169,6 +169,7 @@ class rpsfw_Gateway_PayPal_Standard_API_Handler {
 
         if ( 200 !== $code ) {
             rpsfw_Gateway_PayPal_Standard::log( 'API response code: ' . $code );
+            /* translators: %d: HTTP response code. */
             return new WP_Error( 'api-error', sprintf( __( 'Invalid API response (Code: %d)', 'restore-paypal-standard-for-woocommerce' ), $code ) );
         }
 

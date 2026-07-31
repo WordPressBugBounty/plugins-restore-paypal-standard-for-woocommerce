@@ -62,6 +62,7 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
                 'sandbox_email' => array(
                     'title'       => __( 'Sandbox PayPal Email', 'restore-paypal-standard-for-woocommerce' ),
                     'type'        => 'email',
+                    /* translators: %s: link to the sandbox mode documentation. */
                     'description' => sprintf( __( 'Enter the email of your PayPal sandbox account for testing. %s', 'restore-paypal-standard-for-woocommerce' ), '<a href="https://wpplugin.org/documentation/sandbox-mode/" target="_blank">' . __( 'Learn more about sandbox mode', 'restore-paypal-standard-for-woocommerce' ) . '</a>' ),
                     'default'     => '',
                     'desc_tip'    => __( 'A Sandbox account is used for testing with fake money to make sure things are working correctly. Enter the email of your PayPal sandbox account for testing.', 'restore-paypal-standard-for-woocommerce' ),
@@ -170,6 +171,7 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
                 'api_credentials_title' => array(
                     'title'       => __( 'API Credentials', 'restore-paypal-standard-for-woocommerce' ),
                     'type'        => 'title',
+                    /* translators: %s: link to the PayPal API credentials documentation. */
                     'description' => sprintf( __( 'Enter your PayPal API credentials to process refunds via PayPal. Learn how to access your %s.', 'restore-paypal-standard-for-woocommerce' ), '<a href="https://wpplugin.org/documentation/how-to-request-paypal-api-signature-credentials/" target="_blank" rel="noopener noreferrer">' . __( 'PayPal API Credentials', 'restore-paypal-standard-for-woocommerce' ) . '</a>' ),
                     'class'       => 'rpsfw-section-title',
                 ),
@@ -253,6 +255,7 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
                     'title'       => __( 'View Debug Logs', 'restore-paypal-standard-for-woocommerce' ),
                     'type'        => 'title',
                     'description' => sprintf(
+                        /* translators: %s: URL of the WooCommerce status logs page. */
                         __( 'You can view PayPal Standard logs in the <a href="%s">WooCommerce Status > Logs</a> section.', 'restore-paypal-standard-for-woocommerce' ),
                         esc_url( admin_url( 'admin.php?page=wc-status&tab=logs' ) )
                     ),

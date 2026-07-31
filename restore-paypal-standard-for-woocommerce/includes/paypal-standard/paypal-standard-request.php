@@ -98,6 +98,7 @@ class rpsfw_Gateway_PayPal_Standard_Request {
         
         // If no line items were added, add the full amount as a single item to prevent AMOUNT_MISSING error
         if ( empty($this->line_items) ) {
+            /* translators: %s: order number. */
             $paypal_args['item_name_1'] = sprintf( __( 'Order %s', 'restore-paypal-standard-for-woocommerce' ), $order->get_order_number() );
             $paypal_args['quantity_1'] = 1;
             $paypal_args['amount_1'] = $this->number_format( $order->get_total() - $order->get_shipping_total() - $order->get_total_tax(), $order );

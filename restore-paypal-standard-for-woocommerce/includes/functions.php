@@ -154,6 +154,37 @@ function rpsfw_add_settings_link( $links ) {
 }
 
 /**
+ * Set the "_should_load" flag on WooCommerce's native PayPal Standard gateway.
+ *
+ * The value is written straight to the gateway's option rather than by calling
+ * WC_Gateway_Paypal::update_option(), which would mean instantiating the gateway.
+ * That constructor calls __() on the 'woocommerce' text domain, and on plugins_loaded
+ * that is before 'init' - which makes WordPress 6.7+ emit a "Translation loading for
+ * the woocommerce domain was triggered too early" notice. Writing the option has the
+ * same effect: WC_Settings_API::update_option() simply stores the value in
+ * get_option_key(), which for this gateway is 'woocommerce_paypal_settings'.
+ *
+ * @param string $value Either 'yes' or 'no'.
+ * @return void
+ */
+function rpsfw_set_native_paypal_should_load( $value ) {
+    // Nothing to toggle if WooCommerce or its PayPal Standard gateway is not present.
+    if ( ! class_exists( 'WC_Gateway_Paypal' ) ) {
+        return;
+    }
+
+    $settings = get_option( 'woocommerce_paypal_settings', array() );
+
+    if ( ! is_array( $settings ) ) {
+        $settings = array();
+    }
+
+    $settings['_should_load'] = $value;
+
+    update_option( 'woocommerce_paypal_settings', $settings, 'yes' );
+}
+
+/**
  * Initialize the plugin
  */
 function woo_paypal_standard_init() {
@@ -187,11 +218,11 @@ function rpsfw_admin_notice() {
         $settings_url = admin_url( 'admin.php?page=wc-settings&tab=checkout&section=restore_paypal_standard' );
         
         echo '<div class="notice notice-info is-dismissible">';
-        echo '<p>' . sprintf( 
-            /* translators: %s: settings URL */
+        echo '<p>' . wp_kses_post( sprintf(
+            /* translators: %s: link reading "configure your settings". */
             __( 'Thank you for installing Restore PayPal Standard for WooCommerce. Please %s to start accepting payments.', 'restore-paypal-standard-for-woocommerce' ),
-            '<a href="' . esc_url( $settings_url ) . '">' . __( 'configure your settings', 'restore-paypal-standard-for-woocommerce' ) . '</a>'
-        ) . '</p>';
+            '<a href="' . esc_url( $settings_url ) . '">' . esc_html__( 'configure your settings', 'restore-paypal-standard-for-woocommerce' ) . '</a>'
+        ) ) . '</p>';
         echo '</div>';
         
         // Delete the transients so the notice only shows once

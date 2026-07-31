@@ -154,17 +154,33 @@ class rpsfw_Gateway_PayPal_Standard_PDT_Handler extends rpsfw_Gateway_PayPal_Sta
      * @param array    $details Transaction details.
      */
     protected function validate_transaction_details( $order, $details ) {
-        // Validate receiver email (if provided)
-        if ( isset( $details['receiver_email'] ) && !empty( $this->receiver_email ) ) {
+        // PDT runs again every time the buyer loads the order-received URL with a ?tx= token,
+        // including for orders the IPN handler has already paid and verified. These checks exist
+        // to stop an order being completed, never to reverse a completion that already happened,
+        // so skip them once the order is paid.
+        $needs_verification = ! $order->has_status( wc_get_is_paid_statuses() );
+
+        // Validate receiver email. When a receiving account is configured the response has to
+        // name it - a missing receiver_email means the payment cannot be confirmed as having
+        // reached this store, which is not the same as it having passed.
+        if ( $needs_verification && !empty( $this->receiver_email ) ) {
+            if ( ! isset( $details['receiver_email'] ) ) {
+                rpsfw_Gateway_PayPal_Standard::log('PDT Response: no receiver_email returned, cannot confirm the payment reached this store. Order #' . $order->get_id());
+
+                $order->update_status('on-hold', __('Validation error: the PayPal PDT response did not identify the receiving account, so the payment could not be verified.', 'restore-paypal-standard-for-woocommerce'));
+
+                return false;
+            }
+
             if ( strtolower( $details['receiver_email'] ) !== strtolower( $this->receiver_email ) ) {
                 rpsfw_Gateway_PayPal_Standard::log('PDT Response: Receiver email mismatch - ' . $details['receiver_email'] . ' vs ' . $this->receiver_email);
-                
+
                 /* translators: %1$s: receiver email, %2$s: order ID */
-                $order->update_status('on-hold', sprintf(__('Validation error: PayPal PDT response from a different email address (%1$s). Order #%2$s', 'restore-paypal-standard-for-woocommerce'), 
+                $order->update_status('on-hold', sprintf(__('Validation error: PayPal PDT response from a different email address (%1$s). Order #%2$s', 'restore-paypal-standard-for-woocommerce'),
                     $details['receiver_email'],
                     $order->get_id()
                 ));
-                
+
                 return false;
             }
         }
@@ -184,20 +200,43 @@ class rpsfw_Gateway_PayPal_Standard_PDT_Handler extends rpsfw_Gateway_PayPal_Sta
 
                     // If the order is already completed, just add a note
                     if ( $order->has_status( wc_get_is_paid_statuses() ) ) {
-                        $order->add_order_note( 
-                            sprintf( 
+                        $order->add_order_note(
+                            sprintf(
+                                /* translators: %s: PayPal transaction ID. */
                                 __( 'PayPal PDT: Payment verified (ID: %s)', 'restore-paypal-standard-for-woocommerce' ),
-                                $transaction_id 
-                            ) 
+                                $transaction_id
+                            )
                         );
                     } else {
+                        // The amount and currency are carried in client side form fields on the way
+                        // to PayPal, so a buyer can pay less than the order total. Check what was
+                        // actually paid before completing the order, the same way the IPN handler
+                        // does. The IPN handler aborts early on an already paid order, so this is
+                        // the only amount check on a synchronous PDT completion. On a mismatch the
+                        // order is left on-hold for manual review instead of being marked paid.
+                        if ( ! isset( $details['mc_gross'], $details['mc_currency'] )
+                            || $order->get_currency() !== $details['mc_currency']
+                            || number_format( $order->get_total(), 2, '.', '' ) !== number_format( (float) $details['mc_gross'], 2, '.', '' ) ) {
+
+                            rpsfw_Gateway_PayPal_Standard::log( 'PDT Response: payment could not be verified for order #' . $order->get_id()
+                                . ' (order total ' . $order->get_total() . ' ' . $order->get_currency()
+                                . ' | returned gross ' . ( isset( $details['mc_gross'] ) ? $details['mc_gross'] : '(missing)' )
+                                . ' ' . ( isset( $details['mc_currency'] ) ? $details['mc_currency'] : '(missing)' ) . ')' );
+
+                            /* translators: %s: Amount. */
+                            $order->update_status( 'on-hold', sprintf( __( 'Validation error: PayPal PDT amounts do not match (gross %s).', 'restore-paypal-standard-for-woocommerce' ), isset( $details['mc_gross'] ) ? $details['mc_gross'] : '' ) );
+
+                            return false;
+                        }
+
                         // If order is still pending, complete it
                         $order->payment_complete( $transaction_id );
-                        $order->add_order_note( 
-                            sprintf( 
+                        $order->add_order_note(
+                            sprintf(
+                                /* translators: %s: PayPal transaction ID. */
                                 __( 'PayPal PDT: Payment completed (ID: %s)', 'restore-paypal-standard-for-woocommerce' ),
-                                $transaction_id 
-                            ) 
+                                $transaction_id
+                            )
                         );
                     }
                     break;
@@ -207,7 +246,8 @@ class rpsfw_Gateway_PayPal_Standard_PDT_Handler extends rpsfw_Gateway_PayPal_Sta
                     
                     $order->add_order_note( 
                         sprintf( 
-                            __( 'PayPal PDT: Payment pending (%s). Reason: %s', 'restore-paypal-standard-for-woocommerce' ),
+                            /* translators: %1$s: PayPal transaction ID, %2$s: pending reason. */
+                            __( 'PayPal PDT: Payment pending (%1$s). Reason: %2$s', 'restore-paypal-standard-for-woocommerce' ),
                             $transaction_id,
                             $pending_reason
                         ) 
@@ -221,6 +261,7 @@ class rpsfw_Gateway_PayPal_Standard_PDT_Handler extends rpsfw_Gateway_PayPal_Sta
                     // For other payment statuses, just add a note
                     $order->add_order_note( 
                         sprintf( 
+                            /* translators: %1$s: payment status, %2$s: PayPal transaction ID. */
                             __( 'PayPal PDT: Payment status: %1$s. Transaction ID: %2$s', 'restore-paypal-standard-for-woocommerce' ),
                             $payment_status,
                             $transaction_id

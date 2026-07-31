@@ -2,9 +2,9 @@
 Contributors: scottpaterson,wp-plugin
 Tags: woocommerce, paypal, payment gateway, payment, standard
 Requires at least: 5.6
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 5.6
-Stable tag: 3.1.0
+Stable tag: 3.1.2
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -41,6 +41,15 @@ If you need support, please use the WordPress.org forums for this plugin.
 1. This screenshot shows the WooCommerce Enable Gateways settings page with the PayPal Standard Option restored!
 
 == Changelog ==
+
+= 3.1.2 =
+* 7/28/26
+* Fix - Coding standards and translation fixes.
+
+= 3.1.1 =
+* 7/28/26
+* Fix - Security fixes related to PayPal IPN and PDT.
+* Fix - Resolved the 'Translation loading for the WooCommerce domain was triggered too early' notice in WordPress 6.7+, caused by loading WooCommerce's PayPal gateway on plugins_loaded.
 
 = 3.1.0 =
 * 12/16/25
