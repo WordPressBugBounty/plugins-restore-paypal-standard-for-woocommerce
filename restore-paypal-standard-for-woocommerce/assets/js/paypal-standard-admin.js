@@ -4,18 +4,17 @@
 (function($) {
     'use strict';
     
-    // This file serves as a base for any additional admin functionality
-    // The main toggle functionality is injected inline in the admin_scripts method
-    
+    // Scopes the gateway settings screen to the selected Mode: Live Mode shows
+    // the live PayPal email / API credentials, Sandbox Mode shows the sandbox
+    // ones, and the inactive set is hidden so it cannot be filled in by mistake.
+
     $(document).ready(function() {
-        var gatewayId = 'restore-paypal-standard';
+        // Must match the gateway id exactly (underscores) — WooCommerce builds
+        // field ids as woocommerce_{gateway_id}_{field}.
+        var gatewayId = 'restore_paypal_standard';
         
-        // Get translated strings from global object
-        var translatedStrings = window.rpsfwPayPalParams || {
-            sandboxNotice: 'SANDBOX MODE ENABLED',
-            sandboxHelpLinkText: 'Learn how to set up a PayPal Sandbox account',
-            descriptionText: ''
-        };
+        // Translated strings provided from PHP via wp_localize_script.
+        var translatedStrings = window.rpsfwPayPalParams || {};
         
         // Function to get field ID with proper WooCommerce prefix
         function getFieldId(field) {
@@ -24,16 +23,18 @@
         
         // Function to toggle PayPal fields based on selected mode
         function toggleFields() {
+            // The Mode selector only lives on the General tab. On the other
+            // tabs (Advanced carries the live/sandbox API credentials) fall
+            // back to the saved mode passed in from PHP, so those fields are
+            // scoped to the active mode too.
             var modeSelector = $(getFieldId('testmode'));
-            if (!modeSelector.length) return; // Exit if mode selector isn't on this page
-            
-            var currentMode = modeSelector.val();
-            console.log('PayPal Standard: Current mode:', currentMode);
-            
-            // Get all form rows and settings wrapper
-            var allRows = modeSelector.closest('form').find('tr');
-            var settingsWrap = modeSelector.closest('form');
-            
+            var currentMode = modeSelector.length ? modeSelector.val() : translatedStrings.testmode;
+
+            if (typeof currentMode === 'undefined') return;
+
+            var settingsWrap = $('#mainform');
+            if (!settingsWrap.length) return;
+
             // Update styling based on mode
             settingsWrap.removeClass('rpsfw-sandbox-mode rpsfw-live-mode');
             settingsWrap.addClass(currentMode === 'yes' ? 'rpsfw-sandbox-mode' : 'rpsfw-live-mode');
@@ -41,6 +42,7 @@
             // Define field groups based on mode
             var liveFields = [
                 'email',
+                'receiver_email',
                 'api_username',
                 'api_password',
                 'api_signature'
@@ -162,26 +164,28 @@
             }
         }
         
-        // Initialize when page loads - if we're on a PayPal settings page
-        if ($('.rpsfw-settings-tabs').length) {
-            // If the mode field exists on this section
-            if ($(getFieldId('testmode')).length) {
-                storeOriginalDescription();
-                toggleFields();
-                
-                // Run when mode is changed
-                $(document).on('change', getFieldId('testmode'), function() {
-                    console.log('PayPal Standard: Mode changed to', $(this).val());
-                    toggleFields();
-                });
-            }
-            
-            // Mark active section tab
-            var urlParams = new URLSearchParams(window.location.search);
-            var currentSubSection = urlParams.get('sub_section') || 'general';
-            $('.rpsfw-settings-tabs .nav-tab').removeClass('nav-tab-active');
-            $('.rpsfw-settings-tabs .nav-tab[href*="sub_section=' + currentSubSection + '"]').addClass('nav-tab-active');
-        }
+        // Initialize. This script is only enqueued on our own gateway section
+        // (see rpsfw_Gateway_PayPal_Standard::admin_scripts), so there is no
+        // further screen check to make here — an earlier gate on a
+        // '.rpsfw-settings-tabs' element that the settings screen never
+        // renders is what kept the mode toggle from ever running.
+        storeOriginalDescription();
+        toggleFields();
+
+        // Run when mode is changed. Delegated, so it also covers the
+        // select2/enhanced-select replacement of the Mode dropdown.
+        $(document).on('change', getFieldId('testmode'), function() {
+            toggleFields();
+        });
+
+        // Belt-and-suspenders: ensure WooCommerce's save button gets
+        // enabled when any input on this form changes. WC core binds its
+        // own 'change input' handler in settings.js, but in some cases
+        // (notably unchecking a checkbox right after page load) the
+        // event was getting dropped, leaving the button disabled.
+        $('#mainform').on('change input', 'input, select, textarea', function() {
+            $('.woocommerce-save-button').removeAttr('disabled');
+        });
     });
     
 })(jQuery); 

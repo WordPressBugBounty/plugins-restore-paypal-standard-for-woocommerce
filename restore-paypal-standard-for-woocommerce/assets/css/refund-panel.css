@@ -1,0 +1,84 @@
+/**
+ * Shared gateway refund panel (admin order / subscription screens).
+ *
+ * @package RestorePayPalStandard
+ */
+
+.rpsfw-refund-panel .rpsfw-refund-intro {
+	margin: 0 0 12px;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-table {
+	border-collapse: collapse;
+	margin-bottom: 10px;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-table th,
+.rpsfw-refund-panel .rpsfw-refund-table td {
+	padding: 8px 10px;
+	vertical-align: middle;
+	text-align: left;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-table th {
+	font-weight: 600;
+}
+
+.rpsfw-refund-panel .rpsfw-charge-total {
+	color: #646970;
+	font-size: 12px;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-table code {
+	font-size: 11px;
+	word-break: break-all;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-amount {
+	width: 110px;
+	max-width: 100%;
+}
+
+.rpsfw-refund-panel .rpsfw-refundable-cell {
+	white-space: nowrap;
+	font-weight: 600;
+}
+
+.rpsfw-refund-panel .rpsfw-cancel-cell label {
+	white-space: nowrap;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-charge-btn {
+	white-space: nowrap;
+}
+
+.rpsfw-refund-panel .rpsfw-row-status {
+	margin-top: 6px;
+	font-size: 12px;
+	color: #646970;
+	white-space: nowrap;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-feedback {
+	margin: 10px 0 0;
+	padding: 6px 12px;
+}
+
+.rpsfw-refund-panel .rpsfw-refund-feedback.notice {
+	border-left-width: 4px;
+	border-left-style: solid;
+}
+
+/* Brief highlight when the native Refund button jumps here. */
+@keyframes rpsfw-refund-flash {
+	0% {
+		background-color: #fcf3d6;
+	}
+	100% {
+		background-color: transparent;
+	}
+}
+
+.rpsfw-refund-panel.rpsfw-flash {
+	animation: rpsfw-refund-flash 1.6s ease-out;
+}

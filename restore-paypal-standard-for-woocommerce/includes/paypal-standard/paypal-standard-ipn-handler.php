@@ -175,17 +175,39 @@ class rpsfw_Gateway_PayPal_Standard_IPN_Handler extends rpsfw_Gateway_PayPal_Sta
     }
 
     /**
-     * Check receiver email from PayPal. If the receiver email in the IPN is different than what is stored in our settings, the payment was not made to this store's PayPal account, so put the order on-hold and stop - exactly as the currency and amount checks above do.
+     * Check the receiver email from PayPal against the merchant's configured
+     * account, and ABORT when they differ.
+     *
+     * SECURITY: this must stop processing, not merely note the mismatch. The
+     * PayPal payment form is client-side, so a buyer can change the `business`
+     * field to their own PayPal account, pay themselves the full amount, and
+     * PayPal will still deliver a genuine VERIFIED IPN to the merchant. If the
+     * order were completed anyway, the merchant would ship goods for money they
+     * never received. The order is left on-hold for manual review, exactly as
+     * the currency and amount validators do.
      *
      * @param WC_Order $order          Order object.
      * @param string   $receiver_email Email to validate.
      */
     protected function validate_receiver_email( $order, $receiver_email ) {
+        // Nothing configured to compare against - skip rather than block.
+        //
+        // The gateway is unavailable at checkout without a PayPal email, so
+        // this is only reachable for an IPN arriving against a store that has
+        // since been misconfigured (for example switched to test mode with no
+        // sandbox email set, while a live order's IPN is still being retried).
+        // Refusing every payment in that state would strand real orders, and an
+        // empty setting is a merchant configuration, not something a buyer can
+        // influence. The currency and amount checks still apply either way.
+        if ( '' === trim( (string) $this->receiver_email ) ) {
+            return;
+        }
+
         if ( strcasecmp( trim( $receiver_email ), trim( $this->receiver_email ) ) !== 0 ) {
-            rpsfw_Gateway_PayPal_Standard::log( 'IPN Response: Receiver email mismatch - ' . $receiver_email . ' vs ' . $this->receiver_email );
+            rpsfw_Gateway_PayPal_Standard::log( 'Payment error: Receiver email mismatch - ' . $receiver_email . ' vs ' . $this->receiver_email );
 
             /* translators: %s: receiver email */
-            $order->update_status('on-hold', sprintf(__('Validation error: PayPal IPN response from a different email address (%s).', 'restore-paypal-standard-for-woocommerce'), $receiver_email));
+            $order->update_status('on-hold', sprintf(__('Validation error: PayPal IPN response from a different email address (%s). The payment was NOT made to this store\'s PayPal account.', 'restore-paypal-standard-for-woocommerce'), $receiver_email));
 
             exit;
         }

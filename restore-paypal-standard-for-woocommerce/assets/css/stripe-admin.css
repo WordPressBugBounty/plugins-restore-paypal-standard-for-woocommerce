@@ -1,0 +1,220 @@
+/**
+ * Stripe Admin Styles
+ */
+
+/* Connection Status Box - match PayPal Commerce style */
+.stripe-connection-status-inline,
+.stripe-webhook-status-inline {
+    background: #d4e9f7;
+    border: 1px solid #9ec9e0;
+    border-radius: 6px;
+    padding: 15px;
+    margin: 5px 0;
+    max-width: 400px !important;
+    width: 100% !important;
+    display: block !important;
+    box-sizing: border-box !important;
+}
+
+/* Webhook box is wider than the connection box because it has more content
+   (URL, button row, etc.) */
+.stripe-webhook-status-inline {
+    max-width: 600px !important;
+}
+
+/* Stripe Connect Button */
+.button.button-primary[href*="stripe-connect"],
+.button.button-primary[href*="Connect with Stripe"],
+.stripe-connection-status-inline .button.button-primary {
+    background: #635bff;
+    border-color: #635bff;
+    color: #fff;
+    text-shadow: none;
+    box-shadow: none;
+}
+
+.button.button-primary[href*="stripe-connect"]:hover,
+.button.button-primary[href*="Connect with Stripe"]:hover,
+.stripe-connection-status-inline .button.button-primary:hover {
+    background: #0a2540;
+    border-color: #0a2540;
+    color: #fff;
+}
+
+/* Connection Status Notices */
+.rpsfw-stripe-connection-status .notice {
+    padding: 15px;
+}
+
+.rpsfw-stripe-connection-status .notice p {
+    margin: 0.5em 0;
+}
+
+.rpsfw-stripe-connection-status .notice strong {
+    font-size: 14px;
+}
+
+/* Disconnect Link */
+a[href*="stripe_disconnected"] {
+    color: #b32d2e;
+    text-decoration: none;
+}
+
+a[href*="stripe_disconnected"]:hover {
+    color: #dc3232;
+    text-decoration: underline;
+}
+
+/* Success Overlay - matching PayPal Commerce style */
+.rpsfw-stripe-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 999999;
+}
+
+.rpsfw-stripe-overlay.active {
+    display: flex !important;
+    justify-content: center;
+    align-items: center;
+}
+
+.rpsfw-stripe-overlay-content {
+    text-align: center;
+    background: #fff;
+    padding: 40px 60px;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 400px;
+}
+
+.rpsfw-stripe-overlay-content h2 {
+    margin: 20px 0 10px;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.3;
+    padding-bottom: 4px;
+    background: linear-gradient(135deg, #635bff 0%, #0a2540 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Error variant: red gradient on title, no spinner. */
+.rpsfw-stripe-overlay.is-error .rpsfw-stripe-overlay-content h2 {
+    background: linear-gradient(135deg, #d63638 0%, #b32d2e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+/* Info variant: neutral gray. */
+.rpsfw-stripe-overlay.is-info .rpsfw-stripe-overlay-content h2 {
+    background: linear-gradient(135deg, #2c3338 0%, #50575e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+.rpsfw-stripe-overlay-content p {
+    margin: 0;
+    color: #666;
+    font-size: 16px;
+}
+
+.rpsfw-stripe-spinner {
+    margin: 0 auto 20px;
+    width: 60px;
+    height: 60px;
+    border: 6px solid #f3f3f3;
+    border-top: 6px solid #635bff;
+    border-radius: 50%;
+    animation: rpsfw-stripe-spin 1s linear infinite;
+}
+
+@keyframes rpsfw-stripe-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Save Changes Notice - Inline with h2 */
+.rpsfw-stripe-save-notice-inline {
+    float: right;
+    background: #fff8e5;
+    border: 1px solid #ffb900;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: normal;
+    line-height: 1.4;
+    margin-left: 15px;
+    white-space: nowrap;
+}
+
+.rpsfw-stripe-save-notice-inline .dashicons {
+    color: #ffb900;
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+.rpsfw-stripe-save-notice-inline span:not(.dashicons) {
+    color: #1d2327;
+    vertical-align: middle;
+}
+
+/* Payment Options Accordion Styles */
+.rpsfw-payment-accordion-title {
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.2s ease;
+    user-select: none;
+    padding: 10px 15px !important;
+    margin: 15px 0 10px 0 !important;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.rpsfw-payment-accordion-title:hover {
+    background-color: #f0f0f0;
+}
+
+.rpsfw-payment-accordion-title .rpsfw-accordion-icon {
+    float: right;
+    font-size: 18px;
+    color: #2271b1;
+    transition: transform 0.2s ease;
+    margin-left: 10px;
+}
+
+.rpsfw-payment-accordion-title.collapsed .rpsfw-accordion-icon {
+    transform: rotate(0deg);
+}
+
+.rpsfw-payment-accordion-title:not(.collapsed) .rpsfw-accordion-icon {
+    transform: rotate(180deg);
+}
+
+/* Accordion wrapper for smooth animations */
+.rpsfw-accordion-wrapper {
+    overflow: hidden;
+}
+
+
+/* Description text below connection/webhook boxes */
+.stripe-connection-status-inline + .description {
+    max-width: 400px !important;
+    display: block;
+    margin-top: 10px;
+}
+
+.stripe-webhook-status-inline + .description {
+    max-width: 600px !important;
+    display: block;
+    margin-top: 10px;
+}

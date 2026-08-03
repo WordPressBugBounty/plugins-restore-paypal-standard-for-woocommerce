@@ -58,12 +58,12 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
                     'default'     => '',
                     'desc_tip'    => true,
                     //'placeholder' => __( 'PayPal primary email', 'restore-paypal-standard-for-woocommerce' ),
+                    'class'       => 'rpsfw-live-field',
                 ),
                 'sandbox_email' => array(
                     'title'       => __( 'Sandbox PayPal Email', 'restore-paypal-standard-for-woocommerce' ),
                     'type'        => 'email',
-                    /* translators: %s: link to the sandbox mode documentation. */
-                    'description' => sprintf( __( 'Enter the email of your PayPal sandbox account for testing. %s', 'restore-paypal-standard-for-woocommerce' ), '<a href="https://wpplugin.org/documentation/sandbox-mode/" target="_blank">' . __( 'Learn more about sandbox mode', 'restore-paypal-standard-for-woocommerce' ) . '</a>' ),
+                    'description' => __( 'Enter the email of your PayPal sandbox account for testing.', 'restore-paypal-standard-for-woocommerce' ),
                     'default'     => '',
                     'desc_tip'    => __( 'A Sandbox account is used for testing with fake money to make sure things are working correctly. Enter the email of your PayPal sandbox account for testing.', 'restore-paypal-standard-for-woocommerce' ),
                     //'placeholder' => 'sandbox@example.com',
@@ -171,7 +171,7 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
                 'api_credentials_title' => array(
                     'title'       => __( 'API Credentials', 'restore-paypal-standard-for-woocommerce' ),
                     'type'        => 'title',
-                    /* translators: %s: link to the PayPal API credentials documentation. */
+                    /* translators: %s: link to PayPal API credentials documentation. */
                     'description' => sprintf( __( 'Enter your PayPal API credentials to process refunds via PayPal. Learn how to access your %s.', 'restore-paypal-standard-for-woocommerce' ), '<a href="https://wpplugin.org/documentation/how-to-request-paypal-api-signature-credentials/" target="_blank" rel="noopener noreferrer">' . __( 'PayPal API Credentials', 'restore-paypal-standard-for-woocommerce' ) . '</a>' ),
                     'class'       => 'rpsfw-section-title',
                 ),
@@ -249,13 +249,30 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
                     'type'        => 'checkbox',
                     'label'       => __( 'Enable native PayPal Standard', 'restore-paypal-standard-for-woocommerce' ),
                     'default'     => 'no',
-                    'description' => __( 'DISCLAIMER: WooCommerce may remove this feature at any time. This option should not be used long-term as it relies on native code that might be removed in future WooCommerce updates. This option will display the native PayPal Standard gateway in the WooCommerce payment methods list, so you can configure it as you normally would. You may wish to also disable this gateway if you are having issues. <a href="https://wordpress.org/support/plugin/restore-paypal-standard-for-woocommerce/" target="_blank">Please let us know</a> if you experience any issues so we can fix it for you.</a>', 'restore-paypal-standard-for-woocommerce' ),
+                    'description' => sprintf(
+                        /* translators: %s: link reading "Please let us know", pointing at the support forum */
+                        __( 'DISCLAIMER: WooCommerce may remove this feature at any time. This option should not be used long-term as it relies on native code that might be removed in future WooCommerce updates. This option will display the native PayPal Standard gateway in the WooCommerce payment methods list, so you can configure it as you normally would. You may wish to also disable this gateway if you are having issues. %s if you experience any issues so we can fix it for you.', 'restore-paypal-standard-for-woocommerce' ),
+                        '<a href="' . esc_url( 'https://wordpress.org/support/plugin/restore-paypal-standard-for-woocommerce/' ) . '" target="_blank" rel="noopener noreferrer">'
+                            . esc_html__( 'Please let us know', 'restore-paypal-standard-for-woocommerce' )
+                            . '</a>'
+                    ),
+                ),
+                'reset_settings' => array(
+                    'title'       => __( 'Reset Settings', 'restore-paypal-standard-for-woocommerce' ),
+                    'type'        => 'title',
+                    'description' => sprintf(
+                        '%s<br><br><a href="%s" class="button" onclick="return confirm(\'%s\');">%s</a>',
+                        esc_html__( 'Clears this plugin\'s PayPal Standard settings and resets them to their default values. This does not copy anything from WooCommerce\'s native PayPal gateway. Note: this will disable the gateway and clear your email and other settings.', 'restore-paypal-standard-for-woocommerce' ),
+                        esc_url( wp_nonce_url( add_query_arg( 'action', 'rpsfw_reset_paypal_settings' ), 'rpsfw_reset_paypal_settings', 'rpsfw_nonce' ) ),
+                        esc_js( __( 'This will reset all PayPal Standard settings to their defaults and cannot be undone. Continue?', 'restore-paypal-standard-for-woocommerce' ) ),
+                        esc_html__( 'Reset Settings to Default', 'restore-paypal-standard-for-woocommerce' )
+                    ),
                 ),
                 'view_logs' => array(
                     'title'       => __( 'View Debug Logs', 'restore-paypal-standard-for-woocommerce' ),
                     'type'        => 'title',
                     'description' => sprintf(
-                        /* translators: %s: URL of the WooCommerce status logs page. */
+                        /* translators: %s: URL to the WooCommerce Status logs page. */
                         __( 'You can view PayPal Standard logs in the <a href="%s">WooCommerce Status > Logs</a> section.', 'restore-paypal-standard-for-woocommerce' ),
                         esc_url( admin_url( 'admin.php?page=wc-status&tab=logs' ) )
                     ),
@@ -266,6 +283,11 @@ if ( ! function_exists( 'rpsfw_get_settings_for_section' ) ) {
         // Return the settings for the specified section
         return isset($all_settings[$section]) ? $all_settings[$section] : $all_settings['general'];
     }
+}
+
+// Security: Verify user has permission to access settings
+if ( ! current_user_can( 'manage_woocommerce' ) ) {
+    return array(); // Return empty settings if no permission
 }
 
 // If section parameter is provided, return that section's settings

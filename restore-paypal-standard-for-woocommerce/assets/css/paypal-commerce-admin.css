@@ -1,0 +1,440 @@
+/**
+ * PayPal Commerce Platform Admin Styles
+ */
+
+/* Make all form inputs consistent width */
+.rpsfw-ppcp-settings input[type="text"],
+.rpsfw-ppcp-settings input[type="email"],
+.rpsfw-ppcp-settings input[type="password"],
+.rpsfw-ppcp-settings select,
+.rpsfw-ppcp-settings textarea {
+    max-width: 400px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* Cap Pay Later messaging page width */
+.rpsfw-ppcp-settings table.form-table {
+    max-width: 800px;
+}
+
+.rpsfw-ppcp-settings h3 {
+    max-width: 800px;
+}
+
+.rpsfw-ppcp-settings p {
+    max-width: 800px;
+}
+
+/* Connection Status Box - match input width */
+.paypal-commerce-connection-status-inline,
+.paypal-commerce-webhook-status-inline {
+    background: #d4e9f7;
+    border: 1px solid #9ec9e0;
+    border-radius: 6px;
+    padding: 15px;
+    margin: 5px 0;
+    max-width: 400px !important;
+    width: 100% !important;
+    display: block !important;
+    box-sizing: border-box !important;
+}
+
+/* Webhook box is wider than the connection box because it has more content
+   (URL, button row, etc.) */
+.paypal-commerce-webhook-status-inline {
+    max-width: 600px !important;
+}
+
+/* Description text below connection/webhook boxes */
+.paypal-commerce-connection-status-inline + .description {
+    max-width: 400px !important;
+    display: block;
+    margin-top: 10px;
+}
+
+.paypal-commerce-webhook-status-inline + .description {
+    max-width: 600px !important;
+    display: block;
+    margin-top: 10px;
+}
+
+/* Success Overlay */
+.rpsfw-ppcp-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+    z-index: 999999;
+}
+
+.rpsfw-ppcp-overlay.active {
+    display: flex !important;
+    justify-content: center;
+    align-items: center;
+}
+
+.rpsfw-ppcp-overlay-content {
+    text-align: center;
+    background: #fff;
+    padding: 40px 60px;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 400px;
+}
+
+.rpsfw-ppcp-overlay-content h2 {
+    margin: 20px 0 10px;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.3;
+    padding-bottom: 4px;
+    background: linear-gradient(135deg, #0070ba 0%, #1546a0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Error variant: red gradient on title, no spinner. */
+.rpsfw-ppcp-overlay.is-error .rpsfw-ppcp-overlay-content h2 {
+    background: linear-gradient(135deg, #d63638 0%, #b32d2e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+/* Info variant: neutral gray. */
+.rpsfw-ppcp-overlay.is-info .rpsfw-ppcp-overlay-content h2 {
+    background: linear-gradient(135deg, #2c3338 0%, #50575e 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+}
+
+.rpsfw-ppcp-overlay-content p {
+    margin: 0;
+    color: #666;
+    font-size: 16px;
+}
+
+.rpsfw-ppcp-spinner {
+    margin: 0 auto 20px;
+    width: 60px;
+    height: 60px;
+    border: 6px solid #f3f3f3;
+    border-top: 6px solid #0070ba;
+    border-radius: 50%;
+    animation: rpsfw-spin 1s linear infinite;
+}
+
+@keyframes rpsfw-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Pay Later Settings Styles */
+.rpsfw-ppcp-settings tr[class*="paylater_messaging_"] th,
+.rpsfw-ppcp-settings tr[class*="paylater_messaging_"] td {
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
+/* Section titles for Pay Later locations */
+.rpsfw-ppcp-settings tr[class*="_title"] th {
+    padding-top: 25px !important;
+    font-weight: 600;
+    color: #1d2327;
+    border-top: 1px solid #e0e0e0;
+}
+
+.rpsfw-ppcp-settings tr[class*="_title"]:first-of-type th {
+    border-top: none;
+}
+
+/* Indent sub-options under each location */
+.rpsfw-ppcp-settings tr[class*="_layout"] th,
+.rpsfw-ppcp-settings tr[class*="_logo_type"] th,
+.rpsfw-ppcp-settings tr[class*="_logo_position"] th,
+.rpsfw-ppcp-settings tr[class*="_text_color"] th,
+.rpsfw-ppcp-settings tr[class*="_text_size"] th,
+.rpsfw-ppcp-settings tr[class*="_text_align"] th,
+.rpsfw-ppcp-settings tr[class*="_flex_color"] th,
+.rpsfw-ppcp-settings tr[class*="_flex_ratio"] th {
+    padding-left: 30px !important;
+}
+
+/* Pay Later info box */
+.rpsfw-paylater-info {
+    background: #f0f6fc;
+    border: 1px solid #c3d9ed;
+    border-left: 4px solid #0070ba;
+    padding: 12px 15px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+.rpsfw-paylater-info p {
+    margin: 0;
+    color: #1d2327;
+}
+
+.rpsfw-paylater-info code {
+    background: #fff;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+/* Shortcode info styling */
+.rpsfw-ppcp-settings tr[class*="shortcode_info"] td {
+    padding: 15px 0;
+}
+
+.rpsfw-ppcp-settings tr[class*="shortcode_info"] td p {
+    background: #f0f6fc;
+    border: 1px solid #c3d9ed;
+    border-left: 4px solid #0070ba;
+    padding: 12px 15px;
+    margin: 0;
+    border-radius: 4px;
+}
+
+.rpsfw-ppcp-settings tr[class*="shortcode_info"] td code {
+    background: #fff;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 13px;
+}
+
+/* Pay Later Accordion Styles */
+.rpsfw-paylater-accordion-title {
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.2s ease;
+    user-select: none;
+    padding: 10px 15px !important;
+    margin: 15px 0 10px 0 !important;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.rpsfw-paylater-accordion-title:hover {
+    background-color: #f0f0f0;
+}
+
+.rpsfw-paylater-accordion-title .rpsfw-accordion-icon {
+    float: right;
+    font-size: 18px;
+    color: #2271b1;
+    transition: transform 0.2s ease;
+    margin-left: 10px;
+}
+
+.rpsfw-paylater-accordion-title.collapsed .rpsfw-accordion-icon {
+    transform: rotate(0deg);
+}
+
+.rpsfw-paylater-accordion-title:not(.collapsed) .rpsfw-accordion-icon {
+    transform: rotate(180deg);
+}
+
+/* Accordion wrapper for smooth animations */
+.rpsfw-accordion-wrapper {
+    overflow: hidden;
+}
+
+/* Logo Type Preview Styles */
+.rpsfw-logo-preview {
+    margin-top: 10px;
+    padding: 10px;
+    background: #f9f9f9;
+    border-radius: 4px;
+}
+
+.rpsfw-logo-preview img {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* 3DS Modal Styles */
+.rpsfw-3ds-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 999999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.rpsfw-3ds-modal {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: 900px;
+    width: 100%;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.rpsfw-3ds-modal-header {
+    padding: 20px 25px;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.rpsfw-3ds-modal-header h2 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.rpsfw-3ds-modal-close {
+    background: none;
+    border: none;
+    font-size: 32px;
+    line-height: 1;
+    color: #666;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.rpsfw-3ds-modal-close:hover {
+    background-color: #f0f0f0;
+    color: #000;
+}
+
+.rpsfw-3ds-modal-body {
+    padding: 25px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.rpsfw-3ds-rules-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 15px;
+}
+
+.rpsfw-3ds-rules-table thead {
+    background: #f9f9f9;
+    border-bottom: 2px solid #ddd;
+}
+
+.rpsfw-3ds-rules-table th {
+    padding: 12px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 13px;
+    color: #1d2327;
+}
+
+.rpsfw-3ds-rules-table td {
+    padding: 10px;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 13px;
+}
+
+.rpsfw-3ds-rules-table tbody tr:hover {
+    background-color: #f9f9f9;
+}
+
+.rpsfw-3ds-rules-table code {
+    background: #f0f0f0;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.rpsfw-3ds-action-select {
+    padding: 5px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+    min-width: 100px;
+}
+
+.rpsfw-3ds-modified {
+    color: #d63638;
+    font-weight: 600;
+    margin-left: 5px;
+}
+
+.rpsfw-3ds-modal-footer {
+    padding: 15px 25px;
+    border-top: 1px solid #ddd;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.rpsfw-3ds-modal-footer .button {
+    margin: 0;
+}
+
+/* 3DS Info Accordion */
+.rpsfw-3ds-info-toggle {
+    display: inline-block;
+    margin-top: 5px;
+}
+
+.rpsfw-3ds-info-toggle:hover {
+    text-decoration: underline !important;
+}
+
+.rpsfw-3ds-info-content {
+    display: none; /* Start hidden */
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid rgba(0, 115, 170, 0.2);
+}
+
+/* Save Changes Notice - Inline with h2 */
+.rpsfw-ppcp-save-notice-inline {
+    float: right;
+    background: #fff8e5;
+    border: 1px solid #ffb900;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: normal;
+    line-height: 1.4;
+    margin-left: 15px;
+    white-space: nowrap;
+}
+
+.rpsfw-ppcp-save-notice-inline .dashicons {
+    color: #ffb900;
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+.rpsfw-ppcp-save-notice-inline span:not(.dashicons) {
+    color: #1d2327;
+    vertical-align: middle;
+}

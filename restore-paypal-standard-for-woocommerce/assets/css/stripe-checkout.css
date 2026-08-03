@@ -1,0 +1,68 @@
+/**
+ * Stripe Checkout Styles
+ */
+
+/* Payment Element Container */
+.rpsfw-stripe-element-container {
+    position: relative;
+    min-height: 200px;
+}
+
+/* Loading State */
+.rpsfw-stripe-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    gap: 12px;
+}
+
+.rpsfw-stripe-loading.rpsfw-hidden {
+    display: none;
+}
+
+/* Spinner */
+.rpsfw-stripe-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #635bff;
+    border-radius: 50%;
+    animation: rpsfw-spin 1s linear infinite;
+}
+
+@keyframes rpsfw-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.rpsfw-stripe-loading span {
+    color: #666;
+    font-size: 14px;
+}
+
+/* Error Messages */
+#stripe-payment-errors {
+    color: #df1b41;
+    margin-top: 10px;
+    font-size: 14px;
+    display: none;
+}
+
+#stripe-payment-errors:not(:empty) {
+    display: block;
+}
+
+/* Payment Element - ensure it's visible when loaded */
+.rpsfw-stripe-element-container iframe {
+    display: block !important;
+}
+
+/* Express Checkout Element (Apple Pay / Google Pay one-tap buttons) shown
+   above the card form. Spacing + a subtle divider before the card fields. */
+.rpsfw-stripe-express-container:not(:empty) {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #e5e7eb;
+}

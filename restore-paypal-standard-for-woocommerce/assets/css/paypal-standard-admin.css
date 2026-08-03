@@ -37,26 +37,28 @@ ul.subsubsub + h2, ul.subsubsub + h3 {
 /* Remove any custom .nav-tab styles so the native look is preserved */
 
 /* Hide and show fields based on mode using specificity to override WooCommerce styles */
-.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_email,
-.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_api_username,
-.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_api_password,
-.rpsfw-sandbox-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_api_signature {
+/* Field ids follow the gateway id, which uses underscores: restore_paypal_standard. */
+.rpsfw-sandbox-mode #woocommerce_restore_paypal_standard_email,
+.rpsfw-sandbox-mode #woocommerce_restore_paypal_standard_receiver_email,
+.rpsfw-sandbox-mode #woocommerce_restore_paypal_standard_api_username,
+.rpsfw-sandbox-mode #woocommerce_restore_paypal_standard_api_password,
+.rpsfw-sandbox-mode #woocommerce_restore_paypal_standard_api_signature {
     display: none !important;
 }
 
-.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_email,
-.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_api_username,
-.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_api_password,
-.rpsfw-live-mode.woocommerce-settings-wrap #woocommerce_restore-paypal-standard_sandbox_api_signature {
+.rpsfw-live-mode #woocommerce_restore_paypal_standard_sandbox_email,
+.rpsfw-live-mode #woocommerce_restore_paypal_standard_sandbox_api_username,
+.rpsfw-live-mode #woocommerce_restore_paypal_standard_sandbox_api_password,
+.rpsfw-live-mode #woocommerce_restore_paypal_standard_sandbox_api_signature {
     display: none !important;
 }
 
 /* Hide the entire rows - note we're adding specific class names to the rows in JS for older browsers */
-.rpsfw-sandbox-mode.woocommerce-settings-wrap tr.rpsfw-live-field-row {
+.rpsfw-sandbox-mode tr.rpsfw-live-field-row {
     display: none !important;
 }
 
-.rpsfw-live-mode.woocommerce-settings-wrap tr.rpsfw-sandbox-field-row {
+.rpsfw-live-mode tr.rpsfw-sandbox-field-row {
     display: none !important;
 }
 

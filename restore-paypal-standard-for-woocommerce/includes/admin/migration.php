@@ -176,6 +176,14 @@ function rpsfw_migrate_native_paypal_settings() {
     $is_sandbox = isset($native_settings['testmode']) && 'yes' === $native_settings['testmode'];
     
     if ($is_sandbox) {
+        // Carry the LIVE payee address across as well. The gateway sends to
+        // 'email' in live mode, so dropping it just because the store happened
+        // to be in test mode at migration time would leave live checkout with
+        // no PayPal address the moment the merchant goes live.
+        if (!empty($native_settings['email'])) {
+            $restored_settings['email'] = $native_settings['email'];
+        }
+
         // In sandbox mode, use sandbox_email as primary email
         if (!empty($native_settings['sandbox_email'])) {
             $restored_settings['sandbox_email'] = $native_settings['sandbox_email'];
@@ -265,16 +273,13 @@ function rpsfw_display_migration_notice() {
     if ( get_transient( 'rpsfw_show_migration_notice' ) ) {
         return;
     }
-    
-    // Check if this is the first or second notice
-    $notice_count = intval( get_option( 'rpsfw_migration_notice_count', 0 ) );
-    $notice_class = 'notice-warning';
-    
-    // Display the migration notice
-    rpsfw_render_migration_notice( $notice_count );
-    
-    // Increment the notice count for next time
-    update_option( 'rpsfw_migration_notice_count', $notice_count + 1 );
+
+    // Show the migration prompt whenever native PayPal settings exist and the
+    // migration hasn't been completed/dismissed (handled by
+    // rpsfw_has_native_paypal_settings() above). This is intentionally shown
+    // regardless of whether the Restore PayPal Standard gateway is enabled or
+    // disabled — the prompt appears as soon as the plugin is active.
+    rpsfw_render_migration_notice( 0 );
 }
 
 /**
@@ -286,15 +291,24 @@ function rpsfw_render_migration_notice( $notice_count ) {
     $notice_class = 'notice-warning';
     ?>
     <div class="notice <?php echo esc_attr( $notice_class ); ?> is-dismissible rpsfw-migration-notice" style="padding:15px; border-left-color:#FFB900;" data-notice-id="rpsfw-migration-notice">
-        <h2 style="margin-top:0;"><?php esc_html_e( 'Important: Switch to Restored PayPal Standard', 'restore-paypal-standard-for-woocommerce' ); ?></h2>
+        <h2 style="margin-top:0;"><?php esc_html_e( 'Would you like to migrate any PayPal Standard settings?', 'restore-paypal-standard-for-woocommerce' ); ?></h2>
+        <p><?php esc_html_e( 'If you are planning on using PayPal Standard, we recommend you do this. If not, you can ignore it.', 'restore-paypal-standard-for-woocommerce' ); ?></p>
         <p><?php esc_html_e( 'WooCommerce is phasing out its built-in PayPal Standard payment gateway and may remove it entirely in a future update.', 'restore-paypal-standard-for-woocommerce' ); ?></p>
-        <p><?php esc_html_e( 'To ensure your site continues running without interruption, Restore PayPal Standard for WooCommerce now includes its own standalone PayPal Standard integration - no longer relying on WooCommerce\'s native code.', 'restore-paypal-standard-for-woocommerce' ); ?></p>
+        <p>
+            <?php
+            printf(
+                /* translators: %s: plugin name */
+                esc_html__( 'To ensure your site continues running without interruption, %s now includes its own standalone PayPal Standard integration - no longer relying on WooCommerce\'s native code.', 'restore-paypal-standard-for-woocommerce' ),
+                esc_html( RPSFW_PLUGIN_NAME )
+            );
+            ?>
+        </p>
         <p><?php esc_html_e( 'This means your PayPal Standard setup will continue to work reliably, regardless of future changes in WooCommerce.', 'restore-paypal-standard-for-woocommerce' ); ?></p>
-        <p><strong><?php esc_html_e( 'We highly recommend switching now to avoid any disruption. With your consent, your existing PayPal Standard settings will be copied over automatically to this plugin and the native PayPal Standard Code will be disabled.', 'restore-paypal-standard-for-woocommerce' ); ?></strong></p>
+        <p><strong><?php esc_html_e( 'If you plan on using PayPal Standard, we highly recommend switching now to avoid any disruption. With your consent, your existing PayPal Standard settings will be copied over automatically to this plugin and the native PayPal Standard Code will be disabled.', 'restore-paypal-standard-for-woocommerce' ); ?></strong></p>
         <p><?php esc_html_e( 'After clicking the button below everything should continue to work as normal with no other changes needed.', 'restore-paypal-standard-for-woocommerce' ); ?></p>
         <p>
             <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'action', 'rpsfw_migrate_paypal' ), 'rpsfw_migrate_paypal', 'rpsfw_nonce' ) ); ?>" class="button button-primary">
-                <?php esc_html_e( 'Switch to Restored PayPal Standard', 'restore-paypal-standard-for-woocommerce' ); ?>
+                <?php esc_html_e( 'Switch to Restore PayPal Standard', 'restore-paypal-standard-for-woocommerce' ); ?>
             </a>
         </p>
     </div>
@@ -327,19 +341,9 @@ function rpsfw_handle_dismiss_migration_notice() {
     if ( ! isset( $_REQUEST['nonce'] ) || ! wp_verify_nonce( $_REQUEST['nonce'], 'rpsfw_dismiss_migration_notice' ) ) {
         wp_die( '', '', array( 'response' => 403 ) );
     }
-
-    // Get the notice count from the AJAX request
-    $notice_count = isset( $_REQUEST['notice_count'] ) ? intval( $_REQUEST['notice_count'] ) : 0;
     
-    // If this is the second dismissal (notice_count is already 1 or higher), then permanently dismiss
-    if ( $notice_count >= 1 ) {
-        // Mark notice as permanently dismissed
-        update_option( 'rpsfw_migration_notice_dismissed_permanently', 'yes' );
-    } else {
-        // Set dismissal for 1 week
-        $one_week = 7 * DAY_IN_SECONDS;
-        update_option( 'rpsfw_migration_notice_dismissed_until', time() + $one_week );
-    }
+    // Dismissing the notice once permanently hides it
+    update_option( 'rpsfw_migration_notice_dismissed_permanently', 'yes' );
     
     wp_die();
 }
@@ -354,7 +358,7 @@ function rpsfw_handle_permanent_dismiss_migration_notice() {
         if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( $_GET['rpsfw_nonce'], 'rpsfw_dismiss_migration_notice_permanently' ) ) {
             wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
         }
-
+        
         // Mark notice as permanently dismissed
         update_option( 'rpsfw_migration_notice_dismissed_permanently', 'yes' );
         
@@ -396,7 +400,7 @@ function rpsfw_handle_migration_action() {
         if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( $_GET['rpsfw_nonce'], 'rpsfw_migrate_paypal' ) ) {
             wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
         }
-
+        
         // Run the migration
         rpsfw_migrate_native_paypal_settings();
         
@@ -404,6 +408,88 @@ function rpsfw_handle_migration_action() {
         wp_safe_redirect( remove_query_arg( array( 'action', 'rpsfw_nonce' ) ) );
         exit;
     }
+}
+
+/**
+ * Reset this plugin's PayPal Standard settings back to their default values.
+ *
+ * Exposed from the PayPal Standard "Debugging" settings tab. This does NOT copy
+ * anything from WooCommerce's native PayPal gateway — it simply clears the
+ * plugin's own settings and rewrites them with the defaults defined by the
+ * settings form fields (general, text, advanced and debugging sections).
+ */
+function rpsfw_handle_reset_settings_action() {
+    if ( ! isset( $_GET['action'] ) || 'rpsfw_reset_paypal_settings' !== $_GET['action'] ) {
+        return;
+    }
+
+    // Verify nonce.
+    if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( wp_unslash( $_GET['rpsfw_nonce'] ), 'rpsfw_reset_paypal_settings' ) ) {
+        wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
+    }
+
+    // Only allow store managers to trigger this.
+    if ( ! current_user_can( 'manage_woocommerce' ) ) {
+        wp_die( esc_html__( 'You do not have permission to do this.', 'restore-paypal-standard-for-woocommerce' ) );
+    }
+
+    // Build the default settings from every settings section's form fields.
+    $defaults = array();
+    if ( function_exists( 'rpsfw_get_settings_for_section' ) ) {
+        foreach ( array( 'general', 'text', 'advanced', 'debugging' ) as $section ) {
+            $fields = rpsfw_get_settings_for_section( $section );
+            if ( ! is_array( $fields ) ) {
+                continue;
+            }
+            foreach ( $fields as $key => $field ) {
+                // Skip informational fields (section headings, buttons, log
+                // links) — they are not real settings.
+                if ( isset( $field['type'] ) && 'title' === $field['type'] ) {
+                    continue;
+                }
+                $defaults[ $key ] = isset( $field['default'] ) ? $field['default'] : '';
+            }
+        }
+    }
+
+    // Overwrite the plugin settings with the defaults (full reset).
+    update_option( 'woocommerce_restore_paypal_standard_settings', $defaults );
+
+    // Also clear the migration tracking state so the migration prompt behaves
+    // as if it had never run. Combined with the settings reset (which disables
+    // the gateway), the migration box will appear again the next time the
+    // merchant re-enables the gateway — matching the "show the migrate box only
+    // after the gateway is enabled" flow.
+    delete_option( 'rpsfw_migration_completed' );
+    delete_option( 'rpsfw_migration_notice_dismissed_permanently' );
+    delete_option( 'rpsfw_migration_notice_dismissed_until' );
+    delete_option( 'rpsfw_migration_notice_first_shown' );
+    delete_option( 'rpsfw_migration_notice_count' );
+    delete_transient( 'rpsfw_show_migration_notice' );
+
+    // Flag a success message for the redirect.
+    set_transient( 'rpsfw_settings_reset_success', true, 60 );
+
+    rpsfw_debug_log( 'Restore PayPal Standard settings reset to default values.' );
+
+    // Redirect back to the current page without action parameters.
+    wp_safe_redirect( remove_query_arg( array( 'action', 'rpsfw_nonce' ) ) );
+    exit;
+}
+
+/**
+ * Display a notice after the settings have been reset to defaults.
+ */
+function rpsfw_display_settings_reset_notice() {
+    if ( ! get_transient( 'rpsfw_settings_reset_success' ) ) {
+        return;
+    }
+    delete_transient( 'rpsfw_settings_reset_success' );
+    ?>
+    <div class="notice notice-success is-dismissible">
+        <p><strong><?php esc_html_e( 'PayPal Standard settings have been reset to their default values.', 'restore-paypal-standard-for-woocommerce' ); ?></strong></p>
+    </div>
+    <?php
 }
 
 /**
@@ -416,7 +502,7 @@ function rpsfw_handle_show_migration_action() {
         if ( ! isset( $_GET['rpsfw_nonce'] ) || ! wp_verify_nonce( $_GET['rpsfw_nonce'], 'rpsfw_show_migration' ) ) {
             wp_die( esc_html__( 'Security check failed', 'restore-paypal-standard-for-woocommerce' ) );
         }
-
+        
         // Reset dismissal options to force showing the notice
         delete_option( 'rpsfw_migration_notice_dismissed_until' );
         delete_option( 'rpsfw_migration_notice_dismissed_permanently' );
@@ -462,6 +548,11 @@ function rpsfw_force_display_migration_notice() {
  * @return array Modified array of plugin action links
  */
 function rpsfw_add_migration_action_link( $links ) {
+    // Hide the link if the notice has been dismissed
+    if ( 'yes' === get_option( 'rpsfw_migration_notice_dismissed_permanently', 'no' ) ) {
+        return $links;
+    }
+
     // Only add the link if migration is needed
     if ( rpsfw_has_native_paypal_settings() || 'yes' !== get_option( 'rpsfw_migration_completed', 'no' ) ) {
         $migration_link = '<a href="' . esc_url( wp_nonce_url( add_query_arg( array(
@@ -481,6 +572,8 @@ add_action( 'admin_notices', 'rpsfw_display_migration_success_notice' );
 add_action( 'admin_init', 'rpsfw_handle_migration_action' );
 add_action( 'admin_init', 'rpsfw_handle_permanent_dismiss_migration_notice' );
 add_action( 'admin_init', 'rpsfw_handle_show_migration_action' );
+add_action( 'admin_init', 'rpsfw_handle_reset_settings_action' );
+add_action( 'admin_notices', 'rpsfw_display_settings_reset_notice' );
 add_action( 'wp_ajax_rpsfw_dismiss_migration_notice', 'rpsfw_handle_dismiss_migration_notice' );
 add_action( 'admin_notices', 'rpsfw_force_display_migration_notice' );
 add_filter( 'plugin_action_links_restore-paypal-standard-for-woocommerce/restore-paypal-standard-for-woocommerce.php', 'rpsfw_add_migration_action_link' );

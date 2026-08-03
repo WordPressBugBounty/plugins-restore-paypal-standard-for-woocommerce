@@ -1,0 +1,193 @@
+/**
+ * Support contact widget.
+ *
+ * Fixed to the bottom-right of this plugin's admin screens. Two states:
+ * closed (launcher pill only) and open (panel above the launcher).
+ */
+
+.rpsfw-support {
+	position: fixed;
+	right: 24px;
+	bottom: 24px;
+	z-index: 99999;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+/* Launcher ------------------------------------------------------------- */
+
+.rpsfw-support-launcher {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 18px 10px 14px;
+	border: 0;
+	border-radius: 999px;
+	background: #2271b1;
+	color: #fff;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	box-shadow: 0 4px 14px rgba( 0, 0, 0, 0.18 );
+	transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rpsfw-support-launcher:hover,
+.rpsfw-support-launcher:focus {
+	background: #135e96;
+	color: #fff;
+	box-shadow: 0 6px 18px rgba( 0, 0, 0, 0.24 );
+}
+
+.rpsfw-support-launcher:focus-visible {
+	outline: 2px solid #135e96;
+	outline-offset: 2px;
+}
+
+.rpsfw-support-launcher-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	border-radius: 50%;
+	background: rgba( 255, 255, 255, 0.22 );
+	font-size: 13px;
+	font-weight: 700;
+}
+
+/* Panel ---------------------------------------------------------------- */
+
+.rpsfw-support-panel {
+	width: 340px;
+	max-width: calc( 100vw - 48px );
+	margin-bottom: 12px;
+	border-radius: 10px;
+	background: #fff;
+	box-shadow: 0 10px 40px rgba( 0, 0, 0, 0.22 );
+	overflow: hidden;
+}
+
+.rpsfw-support.is-closed .rpsfw-support-panel {
+	display: none;
+}
+
+.rpsfw-support.is-open .rpsfw-support-launcher {
+	display: none;
+}
+
+.rpsfw-support-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 12px 8px 12px 16px;
+	background: #2271b1;
+	color: #fff;
+}
+
+.rpsfw-support-title {
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.rpsfw-support-minimize {
+	border: 0;
+	background: transparent;
+	color: #fff;
+	font-size: 20px;
+	line-height: 1;
+	padding: 2px 10px;
+	cursor: pointer;
+	border-radius: 4px;
+}
+
+.rpsfw-support-minimize:hover,
+.rpsfw-support-minimize:focus {
+	background: rgba( 255, 255, 255, 0.18 );
+	color: #fff;
+}
+
+.rpsfw-support-body {
+	padding: 14px 16px 16px;
+	max-height: min( 70vh, 520px );
+	overflow-y: auto;
+}
+
+.rpsfw-support-intro {
+	margin: 0 0 12px;
+	color: #50575e;
+}
+
+.rpsfw-support-form p {
+	margin: 0 0 12px;
+}
+
+.rpsfw-support-form label {
+	display: block;
+	margin-bottom: 4px;
+	font-weight: 600;
+	color: #1d2327;
+}
+
+.rpsfw-support-form input[type="text"],
+.rpsfw-support-form input[type="email"],
+.rpsfw-support-form select,
+.rpsfw-support-form textarea {
+	width: 100%;
+	max-width: 100%;
+	box-sizing: border-box;
+}
+
+.rpsfw-support-form textarea {
+	resize: vertical;
+}
+
+.rpsfw-support-actions {
+	margin-bottom: 8px !important;
+}
+
+.rpsfw-support-send[disabled] {
+	opacity: 0.7;
+	cursor: default;
+}
+
+.rpsfw-support-privacy {
+	margin: 0 !important;
+	font-size: 11px;
+	color: #787c82;
+}
+
+/* Notices -------------------------------------------------------------- */
+
+.rpsfw-support-notice {
+	margin: 0 0 12px;
+	padding: 9px 12px;
+	border-radius: 4px;
+	border-left: 4px solid #72aee6;
+	background: #f0f6fc;
+	color: #1d2327;
+}
+
+.rpsfw-support-notice.is-error {
+	border-left-color: #d63638;
+	background: #fcf0f1;
+}
+
+.rpsfw-support-notice.is-success {
+	border-left-color: #00a32a;
+	background: #edfaef;
+}
+
+/* Small screens -------------------------------------------------------- */
+
+@media screen and ( max-width: 600px ) {
+	.rpsfw-support {
+		right: 12px;
+		bottom: 12px;
+	}
+
+	.rpsfw-support-panel {
+		width: calc( 100vw - 24px );
+	}
+}

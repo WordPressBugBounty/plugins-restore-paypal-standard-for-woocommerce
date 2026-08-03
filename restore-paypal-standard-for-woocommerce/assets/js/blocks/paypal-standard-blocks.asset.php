@@ -2,6 +2,9 @@
 /**
  * Asset file for PayPal Standard Blocks integration
  */
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 return array(
     'dependencies' => array(
         'wc-blocks-registry',
