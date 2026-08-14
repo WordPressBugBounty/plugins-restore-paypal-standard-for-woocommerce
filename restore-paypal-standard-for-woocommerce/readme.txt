@@ -3,9 +3,9 @@ Contributors: scottpaterson,wp-plugin
 Donate link: https://wpplugin.org/donate/
 Tags: woocommerce, paypal, stripe, payment gateway, subscriptions
 Requires at least: 5.6
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 5.6
-Stable tag: 4.0.0
+Stable tag: 4.0.1
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -138,6 +138,9 @@ We're here to help! Please create a support post in the [support forum](https://
 8. PayPal Pay Later Settings Page
 
 == Changelog ==
+
+= 4.0.1 =
+* Tested - Tested up to WordPress version 7.1
 
 = 4.0.0 =
 * New - PayPal Commerce Platform gateway with partner onboarding, 3D Secure, dispute handling, Pay Later messaging, and full webhook support
