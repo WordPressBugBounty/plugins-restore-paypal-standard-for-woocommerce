@@ -204,6 +204,20 @@ class RPSFW_Subscriptions_My_Account {
 					<th><?php esc_html_e( 'Recurring total', 'restore-paypal-standard-for-woocommerce' ); ?></th>
 					<td><?php echo wp_kses_post( $subscription->get_formatted_recurring_total() ); ?></td>
 				</tr>
+				<?php $coupons = RPSFW_Subscriptions_Coupons::describe_record_coupons( $subscription ); ?>
+				<?php if ( $coupons ) : ?>
+					<tr>
+						<th><?php esc_html_e( 'Coupons', 'restore-paypal-standard-for-woocommerce' ); ?></th>
+						<td><?php echo esc_html( $coupons ); ?></td>
+					</tr>
+				<?php endif; ?>
+				<?php $shipping = $subscription->get_formatted_recurring_shipping(); ?>
+				<?php if ( $shipping ) : ?>
+					<tr>
+						<th><?php esc_html_e( 'Renewal shipping', 'restore-paypal-standard-for-woocommerce' ); ?></th>
+						<td><?php echo esc_html( $shipping ); ?></td>
+					</tr>
+				<?php endif; ?>
 				<tr>
 					<th><?php esc_html_e( 'Start date', 'restore-paypal-standard-for-woocommerce' ); ?></th>
 					<td><?php echo esc_html( $subscription->get_date_to_display( 'start' ) ); ?></td>

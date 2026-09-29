@@ -303,9 +303,13 @@ class RPSFW_Gateway_Deep_Links {
 
 		self::render_header( $order, $stamped_mode );
 
-		$links = array();
+		// An order that started two or more subscriptions keeps each one's
+		// Stripe id and first payment on that subscription; the order itself
+		// only holds the first subscription's id. List every subscription with
+		// its own payment instead, so none is missing.
+		$links = self::get_stripe_subscription_links( $order, $base );
 
-		if ( $subscription_id ) {
+		if ( empty( $links ) && $subscription_id ) {
 			$links[] = array(
 				'label' => __( 'View subscription', 'restore-paypal-standard-for-woocommerce' ),
 				'url'   => $base . '/subscriptions/' . rawurlencode( $subscription_id ),
@@ -317,7 +321,7 @@ class RPSFW_Gateway_Deep_Links {
 		// On subscription orders the transaction_id is the sub_..., so
 		// META_PAYMENT_INTENT is what we want here. On renewal orders,
 		// transaction_id is the invoice id (in_...).
-		if ( $payment_intent ) {
+		if ( $payment_intent && ! in_array( $payment_intent, wp_list_pluck( $links, 'id' ), true ) ) {
 			$links[] = array(
 				'label' => __( 'View payment', 'restore-paypal-standard-for-woocommerce' ),
 				'url'   => $base . '/payments/' . rawurlencode( $payment_intent ),
@@ -390,6 +394,93 @@ class RPSFW_Gateway_Deep_Links {
 		}
 
 		self::render_link_list( $links );
+	}
+
+	/**
+	 * "View subscription" and "View payment" links for every subscription an
+	 * order started, when it started two or more (one Stripe subscription per
+	 * billing schedule). Each subscription stores its own Stripe id and first
+	 * payment. A subscription with nothing charged yet (a free trial) gets
+	 * only its subscription link.
+	 *
+	 * Returns an empty array for any other order (one subscription, a renewal,
+	 * or a one-off), which keeps the order-level links.
+	 *
+	 * @param WC_Order $order Order.
+	 * @param string   $base  Stripe dashboard base URL for the order's mode.
+	 * @return array Links as render_link_list() takes them.
+	 */
+	private static function get_stripe_subscription_links( $order, $base ) {
+		$subs = array();
+
+		// Built-in subscriptions started by this order.
+		if ( function_exists( 'rpsfw_get_subscriptions_for_order' ) ) {
+			foreach ( rpsfw_get_subscriptions_for_order( $order ) as $record ) {
+				$payment = get_post_meta( $record->get_id(), '_rpsfw_stripe_payment_intent_id', true );
+				if ( ! $payment ) {
+					$payment = get_post_meta( $record->get_id(), '_rpsfw_stripe_charge_id', true );
+				}
+				$subs[] = array(
+					'id'      => $record->get_id(),
+					'name'    => $record->get_item_name(),
+					'sub_id'  => $record->get_gateway_sub_id(),
+					'payment' => $payment,
+				);
+			}
+		}
+
+		// WooCommerce Subscriptions started by this order.
+		if ( empty( $subs ) && function_exists( 'wcs_get_subscriptions_for_order' ) && ! wcs_is_subscription( $order ) ) {
+			foreach ( wcs_get_subscriptions_for_order( $order, array( 'order_type' => 'parent' ) ) as $wc_sub ) {
+				$names = array();
+				foreach ( $wc_sub->get_items() as $item ) {
+					$names[] = $item->get_name();
+				}
+				$payment = $wc_sub->get_meta( '_rpsfw_stripe_payment_intent_id' );
+				if ( ! $payment ) {
+					$payment = $wc_sub->get_meta( '_rpsfw_stripe_charge_id' );
+				}
+				$subs[] = array(
+					'id'      => $wc_sub->get_id(),
+					'name'    => implode( ', ', $names ),
+					'sub_id'  => $wc_sub->get_meta( '_rpsfw_stripe_subscription_id' ),
+					'payment' => $payment,
+				);
+			}
+		}
+
+		if ( count( $subs ) < 2 ) {
+			return array();
+		}
+
+		// Oldest first, i.e. the order they were created in at checkout.
+		usort(
+			$subs,
+			function ( $a, $b ) {
+				return $a['id'] - $b['id'];
+			}
+		);
+
+		$links = array();
+		foreach ( $subs as $sub ) {
+			if ( $sub['sub_id'] ) {
+				$links[] = array(
+					/* translators: %s: subscription product name. */
+					'label' => sprintf( __( 'View subscription (%s)', 'restore-paypal-standard-for-woocommerce' ), $sub['name'] ),
+					'url'   => $base . '/subscriptions/' . rawurlencode( $sub['sub_id'] ),
+					'id'    => $sub['sub_id'],
+				);
+			}
+			if ( $sub['payment'] ) {
+				$links[] = array(
+					/* translators: %s: subscription product name. */
+					'label' => sprintf( __( 'View payment (%s)', 'restore-paypal-standard-for-woocommerce' ), $sub['name'] ),
+					'url'   => $base . '/payments/' . rawurlencode( $sub['payment'] ),
+					'id'    => $sub['payment'],
+				);
+			}
+		}
+		return $links;
 	}
 
 	/**

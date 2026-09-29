@@ -675,6 +675,135 @@ function rpsfw_order_still_needs_payment( $order ) {
 }
 
 /**
+ * Whether a PayPal or Stripe subscription already paid for an order other
+ * than $order_id.
+ *
+ * Each processor subscription pays for exactly one checkout. The checkout
+ * code takes the subscription id from the browser (or the session), so
+ * without this check an id from an earlier order — left behind in the
+ * session, or sent on purpose — would mark a new order paid with no new
+ * payment.
+ *
+ * @param string $processor_sub_id PayPal (I-...) or Stripe (sub_...) subscription id.
+ * @param int    $order_id         Order being paid; 0 when there is none yet.
+ * @return bool
+ */
+function rpsfw_subscription_used_by_other_order( $processor_sub_id, $order_id = 0 ) {
+	$processor_sub_id = (string) $processor_sub_id;
+	if ( '' === $processor_sub_id ) {
+		return false;
+	}
+
+	// Built-in subscriptions keep one record per processor subscription,
+	// including each one of a multi-subscription order.
+	if ( function_exists( 'rpsfw_get_subscription_by_gateway_id' ) ) {
+		$record = rpsfw_get_subscription_by_gateway_id( $processor_sub_id );
+		if ( $record && (int) $record->get_parent_order_id() !== (int) $order_id ) {
+			return true;
+		}
+	}
+
+	// Every checkout path also stores the subscription id as the order's
+	// transaction id (this covers WooCommerce Subscriptions orders).
+	$paid_statuses = array_merge( wc_get_is_paid_statuses(), array( 'on-hold', 'refunded' ) );
+	$orders        = wc_get_orders(
+		array(
+			'transaction_id' => $processor_sub_id,
+			'status'         => $paid_statuses,
+			'exclude'        => array( (int) $order_id ),
+			'limit'          => 1,
+			'return'         => 'ids',
+		)
+	);
+	if ( ! empty( $orders ) ) {
+		return true;
+	}
+
+	// ...and as the order's subscription id, which stays in place when a
+	// webhook completes the order with the invoice id as its transaction id.
+	foreach ( array( '_rpsfw_stripe_subscription_id', '_rpsfw_ppcp_subscription_id' ) as $meta_key ) {
+		$orders = wc_get_orders(
+			array(
+				'meta_key'   => $meta_key, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+				'meta_value' => $processor_sub_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				'status'     => $paid_statuses,
+				'exclude'    => array( (int) $order_id ),
+				'limit'      => 1,
+				'return'     => 'ids',
+			)
+		);
+		if ( ! empty( $orders ) ) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Leave a payment that doesn't match its order unpaid, and tell the
+ * merchant once (webhooks for the same subscription arrive several times).
+ *
+ * @param WC_Order $order   Order that was not marked paid.
+ * @param string   $message Why, for the order note.
+ */
+function rpsfw_note_unmatched_payment( $order, $message ) {
+	if ( ! $order instanceof WC_Order || 'yes' === $order->get_meta( '_rpsfw_payment_mismatch_noted' ) ) {
+		return;
+	}
+	$order->add_order_note( $message );
+	$order->update_meta_data( '_rpsfw_payment_mismatch_noted', 'yes' );
+	$order->save();
+}
+
+/**
+ * Tell WooCommerce Subscriptions that a renewal we recorded from a Stripe or
+ * PayPal webhook was paid.
+ *
+ * WooCommerce Subscriptions only runs its "subscription payment complete"
+ * step for a subscription that isn't active (its own renewals put it on
+ * hold first). Ours stay active, so without this the step never runs — and
+ * that step is what removes a limited coupon after its last discounted
+ * payment, so renewals would keep the discount the processor stopped giving.
+ *
+ * @param WC_Subscription $subscription  Subscription the renewal belongs to.
+ * @param WC_Order        $renewal_order Renewal order just marked paid.
+ * @param bool            $was_active    Whether the subscription was active before the payment.
+ */
+function rpsfw_wcs_record_renewal_payment( $subscription, $renewal_order, $was_active ) {
+	if ( $was_active && is_callable( array( $subscription, 'payment_complete_for_order' ) ) ) {
+		$subscription->payment_complete_for_order( $renewal_order );
+	}
+}
+
+/**
+ * Fetch a PayPal subscription at checkout. APPROVAL_PENDING means the buyer
+ * has not approved it, so it must never mark an order paid; PayPal can take
+ * a moment to report a fresh approval, so look once more before giving up.
+ *
+ * @param WC_Gateway_PayPal_Commerce $gateway         Gateway.
+ * @param string                     $env             'sandbox' or 'live'.
+ * @param array                      $onboard         Onboarding data for $env.
+ * @param string                     $subscription_id PayPal subscription id.
+ * @return array|false Subscription details from PayPal.
+ */
+function rpsfw_ppcp_get_checkout_subscription( $gateway, $env, $onboard, $subscription_id ) {
+	$details = $gateway->api->get_subscription( $env, $onboard, $subscription_id );
+	if ( isset( $details['status'] ) && 'APPROVAL_PENDING' === $details['status'] ) {
+		sleep( 2 );
+		$details = $gateway->api->get_subscription( $env, $onboard, $subscription_id );
+	}
+
+	// PayPal must report exactly the subscription we asked about. Text added
+	// to an id (e.g. "I-ABC123#1") can be dropped on the way to PayPal, which
+	// would make a subscription another order already used look unused.
+	if ( ! is_array( $details ) || ! isset( $details['id'] ) || (string) $details['id'] !== (string) $subscription_id ) {
+		return false;
+	}
+	return $details;
+}
+
+/**
  * Meta key holding the mode a payment was taken in ('test' or 'live').
  *
  * Stamped on orders, and on native subscription records, at payment time. The

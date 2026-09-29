@@ -150,6 +150,8 @@ class RPSFW_Subscriptions_Admin {
 		$customer      = $subscription->get_customer_id() ? get_userdata( $subscription->get_customer_id() ) : false;
 		$product_id    = $subscription->get_product_id();
 		$processor_url = self::get_processor_url( $subscription );
+		$coupons       = RPSFW_Subscriptions_Coupons::describe_record_coupons( $subscription );
+		$shipping      = $subscription->get_formatted_recurring_shipping();
 
 		$rows = array(
 			__( 'Status', 'restore-paypal-standard-for-woocommerce' )          => esc_html( rpsfw_get_subscription_status_label( $subscription->get_status() ) ),
@@ -160,6 +162,8 @@ class RPSFW_Subscriptions_Admin {
 				? '<a href="' . esc_url( get_edit_post_link( $product_id ) ) . '">' . esc_html( $subscription->get_item_name() ) . '</a>' . ( $subscription->get_quantity() > 1 ? esc_html( ' × ' . $subscription->get_quantity() ) : '' )
 				: esc_html( $subscription->get_item_name() ),
 			__( 'Recurring total', 'restore-paypal-standard-for-woocommerce' ) => wp_kses_post( $subscription->get_formatted_recurring_total() ),
+			__( 'Recurring coupons', 'restore-paypal-standard-for-woocommerce' ) => $coupons ? esc_html( $coupons ) : esc_html__( 'None', 'restore-paypal-standard-for-woocommerce' ),
+			__( 'Renewal shipping', 'restore-paypal-standard-for-woocommerce' ) => $shipping ? esc_html( $shipping ) : esc_html__( 'None', 'restore-paypal-standard-for-woocommerce' ),
 			__( 'Sign-up fee', 'restore-paypal-standard-for-woocommerce' )     => $subscription->get_signup_fee() > 0
 				? wp_kses_post( wc_price( $subscription->get_signup_fee(), array( 'currency' => $subscription->get_currency() ) ) )
 				: esc_html__( 'None', 'restore-paypal-standard-for-woocommerce' ),
@@ -502,7 +506,17 @@ class RPSFW_Subscriptions_Admin {
 			echo '</td>';
 			echo '<td>' . esc_html( $entry['relationship'] ) . '</td>';
 			echo '<td>' . esc_html( rpsfw_get_subscription_status_label( $subscription->get_status() ) ) . '</td>';
-			echo '<td>' . wp_kses_post( $subscription->get_formatted_recurring_total() ) . '</td>';
+			echo '<td>' . wp_kses_post( $subscription->get_formatted_recurring_total() );
+			if ( $subscription->get_length() > 0 ) {
+				echo esc_html(
+					', ' . sprintf(
+						/* translators: %d: total number of payments, including the first one */
+						_n( '%d payment in total', '%d payments in total', $subscription->get_length(), 'restore-paypal-standard-for-woocommerce' ),
+						$subscription->get_length()
+					)
+				);
+			}
+			echo '</td>';
 			echo '<td>' . esc_html( $subscription->has_status( array( 'active', 'pending-cancel' ) ) ? $subscription->get_date_to_display( 'next_payment' ) : '—' ) . '</td>';
 			echo '<td><a class="button button-small" href="' . esc_url( $edit_url ) . '">' . esc_html__( 'Manage', 'restore-paypal-standard-for-woocommerce' ) . '</a></td>';
 			echo '</tr>';

@@ -1036,6 +1036,28 @@ class RPSFW_Stripe_API {
         return (float) ( $amount / 100 );
     }
 
+    /**
+     * Whether a checkout subscription was made for this order: both
+     * subscription checkouts make its first invoice bill exactly what
+     * WooCommerce charges today, so a different total means the
+     * subscription belongs to another cart (e.g. a cheaper one paid
+     * separately).
+     *
+     * @param \Stripe\Subscription $sub   Subscription, latest_invoice expanded.
+     * @param WC_Order             $order Order being paid.
+     * @return bool
+     */
+    public static function first_invoice_matches_order( $sub, $order ) {
+        $invoice_cents = isset( $sub->latest_invoice->total ) ? (int) $sub->latest_invoice->total : 0;
+        $order_cents   = self::get_stripe_amount( $order->get_total(), $order->get_currency() );
+        if ( abs( $invoice_cents - $order_cents ) <= 1 ) {
+            return true;
+        }
+
+        RPSFW_Gateway_Stripe::log( sprintf( 'SECURITY: first invoice of %s (%d) does not match order #%d (%d).', $sub->id, $invoice_cents, $order->get_id(), $order_cents ), 'error' );
+        return false;
+    }
+
     // -----------------------------------------------------------------------
     //  Stripe Billing helpers (Customer + Price + Subscription).
     //
@@ -1359,9 +1381,9 @@ class RPSFW_Stripe_API {
             return new WP_Error( 'stripe_error', __( 'Stripe is not properly configured', 'restore-paypal-standard-for-woocommerce' ) );
         }
 
-        $options  = get_option( 'woocommerce_rpsfw_stripe_settings', array() );
-        $testmode = isset( $options['testmode'] ) && 'yes' === $options['testmode'];
-        $env      = $testmode ? 'test' : 'live';
+        // Key the cache by the account this request actually talks to — a
+        // webhook forces the event's mode, which may differ from the setting.
+        $env = self::get_request_mode();
 
         $amount         = isset( $args['amount'] ) ? (float) $args['amount'] : 0;
         $currency       = isset( $args['currency'] ) ? strtolower( $args['currency'] ) : strtolower( get_woocommerce_currency() );
@@ -1451,6 +1473,11 @@ class RPSFW_Stripe_API {
      *                                            only (used to reconcile WooCommerce
      *                                            initial-cart / sign-up-fee coupons
      *                                            that should not recur).
+     *     @type float  $extra_initial_amount     Optional. Anything else WooCommerce
+     *                                            charges today that the first invoice
+     *                                            would not (e.g. shipping for one-time
+     *                                            products). Added to the first invoice only.
+     *     @type string $extra_initial_label      Description for that line item.
      *     @type array  $metadata                 Optional metadata.
      *     @type int    $quantity                 Optional. Defaults to 1.
      * }
@@ -1545,6 +1572,16 @@ class RPSFW_Stripe_API {
                 'amount'      => self::get_stripe_amount( (float) $args['non_subscription_amount'], $default_currency ),
                 'currency'    => $default_currency,
                 'description' => ! empty( $args['non_subscription_label'] ) ? wp_strip_all_tags( $args['non_subscription_label'] ) : __( 'One-time product(s)', 'restore-paypal-standard-for-woocommerce' ),
+            );
+        }
+
+        // Anything else due today that the first invoice would not bill
+        // (shipping for one-time products, for example). First invoice only.
+        if ( ! empty( $args['extra_initial_amount'] ) && (float) $args['extra_initial_amount'] > 0 ) {
+            $pending_items[] = array(
+                'amount'      => self::get_stripe_amount( (float) $args['extra_initial_amount'], $default_currency ),
+                'currency'    => $default_currency,
+                'description' => ! empty( $args['extra_initial_label'] ) ? wp_strip_all_tags( $args['extra_initial_label'] ) : __( 'Shipping and other one-time charges', 'restore-paypal-standard-for-woocommerce' ),
             );
         }
 
@@ -1825,21 +1862,27 @@ class RPSFW_Stripe_API {
     /**
      * Update a Subscription Schedule's phases.
      *
-     * @param string $schedule_id  Schedule id.
-     * @param array  $phases       Phases array (see Stripe API).
-     * @param string $end_behavior 'release' | 'cancel' | 'none'.
+     * @param string $schedule_id        Schedule id.
+     * @param array  $phases             Phases array (see Stripe API).
+     * @param string $end_behavior       'release' | 'cancel' | 'none'.
+     * @param string $proration_behavior Optional. 'none' to never prorate the
+     *                                   current phase; '' keeps Stripe's default.
      * @return \Stripe\SubscriptionSchedule|WP_Error
      */
-    public static function update_subscription_schedule( $schedule_id, $phases, $end_behavior = 'release' ) {
+    public static function update_subscription_schedule( $schedule_id, $phases, $end_behavior = 'release', $proration_behavior = '' ) {
         $client = self::get_client();
         if ( ! $client ) {
             return new WP_Error( 'stripe_error', __( 'Stripe is not properly configured', 'restore-paypal-standard-for-woocommerce' ) );
         }
+        $params = array(
+            'end_behavior' => $end_behavior,
+            'phases'       => $phases,
+        );
+        if ( '' !== $proration_behavior ) {
+            $params['proration_behavior'] = $proration_behavior;
+        }
         try {
-            return $client->subscriptionSchedules->update( $schedule_id, array(
-                'end_behavior' => $end_behavior,
-                'phases'       => $phases,
-            ) );
+            return $client->subscriptionSchedules->update( $schedule_id, $params );
         } catch ( \Stripe\Exception\ApiErrorException $e ) {
             RPSFW_Gateway_Stripe::log( 'Stripe update_subscription_schedule failed: ' . $e->getMessage(), 'error' );
             return new WP_Error( 'stripe_error', $e->getMessage() );
@@ -1884,17 +1927,42 @@ class RPSFW_Stripe_API {
      * canceling the subscription directly errors in that case.
      *
      * @param string $schedule_id Schedule id.
+     * @param array  $params      Optional. invoice_now / prorate (Stripe
+     *                            defaults both to true).
      * @return \Stripe\SubscriptionSchedule|WP_Error
      */
-    public static function cancel_schedule( $schedule_id ) {
+    public static function cancel_schedule( $schedule_id, $params = array() ) {
         $client = self::get_client();
         if ( ! $client ) {
             return new WP_Error( 'stripe_error', __( 'Stripe is not properly configured', 'restore-paypal-standard-for-woocommerce' ) );
         }
         try {
-            return $client->subscriptionSchedules->cancel( $schedule_id );
+            return $client->subscriptionSchedules->cancel( $schedule_id, $params );
         } catch ( \Stripe\Exception\ApiErrorException $e ) {
             RPSFW_Gateway_Stripe::log( 'Stripe cancel_schedule failed: ' . $e->getMessage(), 'error' );
+            return new WP_Error( 'stripe_error', $e->getMessage() );
+        }
+    }
+
+    /**
+     * Release a subscription from its Subscription Schedule. The subscription
+     * stays exactly as it is (same price, same billing date, same end date);
+     * only the schedule's remaining phases are dropped.
+     *
+     * @param string $schedule_id Schedule id.
+     * @return \Stripe\SubscriptionSchedule|WP_Error
+     */
+    public static function release_schedule( $schedule_id ) {
+        $client = self::get_client();
+        if ( ! $client ) {
+            return new WP_Error( 'stripe_error', __( 'Stripe is not properly configured', 'restore-paypal-standard-for-woocommerce' ) );
+        }
+        try {
+            // Keep the end date the schedule gave a subscription limited to a
+            // number of payments; without this Stripe drops it on release.
+            return $client->subscriptionSchedules->release( $schedule_id, array( 'preserve_cancel_date' => true ) );
+        } catch ( \Stripe\Exception\ApiErrorException $e ) {
+            RPSFW_Gateway_Stripe::log( 'Stripe release_schedule failed: ' . $e->getMessage(), 'warning' );
             return new WP_Error( 'stripe_error', $e->getMessage() );
         }
     }

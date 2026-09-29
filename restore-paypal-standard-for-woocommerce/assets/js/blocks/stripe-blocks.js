@@ -211,12 +211,21 @@
         // for a SetupIntent ($0 free-trial subscription with no amount today).
         const intentModeRef = useRef('payment');
 
-        // Cart total (in minor units). We re-create the intent/subscription
-        // whenever this changes (e.g. a coupon added/removed) so the amount
-        // Stripe charges — and, for subscriptions, the price it bills — always
-        // matches the current cart. The stale draft subscription is cancelled
-        // server-side when the new one is created.
+        // What the shopper is buying: the cart total (in minor units), each
+        // item and its quantity, and the coupons. We re-create the
+        // intent/subscription whenever this changes so the amount Stripe
+        // charges — and, for subscriptions, the price it bills — always
+        // matches the current cart. The total alone isn't enough: on a
+        // free-trial cart it stays $0 when a quantity changes, a product is
+        // removed or a coupon is added. The stale draft subscription is
+        // cancelled server-side when the new one is created.
         const cartTotalValue = ( billing && billing.cartTotal ) ? billing.cartTotal.value : null;
+        const cartItems = ( props.cartData && props.cartData.cartItems ) ? props.cartData.cartItems : [];
+        const appliedCoupons = ( billing && billing.appliedCoupons ) ? billing.appliedCoupons : [];
+        const cartKey = [ cartTotalValue ]
+            .concat( cartItems.map( (item) => item.key + 'x' + item.quantity ) )
+            .concat( appliedCoupons.map( (coupon) => coupon.code ) )
+            .join( '|' );
 
         // Track mount state (used by async callbacks) independently of the
         // intent-creation effect, which re-runs on cart changes.
@@ -362,7 +371,7 @@
             return () => {
                 cancelled = true;
             };
-        }, [cartTotalValue]);
+        }, [cartKey]);
 
         // Refresh the debug totals panel on cart change (test mode dev aid).
         // Only runs when the panel is active (initial snapshot present). Kept
@@ -390,7 +399,7 @@
             })
             .catch(() => { /* debug panel is non-critical; ignore */ });
             return () => { cancelled = true; };
-        }, [cartTotalValue]);
+        }, [cartKey]);
 
         // Create payment element
         useEffect(() => {

@@ -123,11 +123,19 @@ class RPSFW_Subscriptions_Manager {
 			return $subscription;
 		}
 
-		// Shipping portion of the recurring amount (used to compose
-		// renewal orders).
+		// Shipping portion of the recurring amount and its method (used to
+		// compose renewal orders).
 		if ( isset( $signature['recurring_shipping'] ) ) {
 			update_post_meta( $subscription->get_id(), '_rpsfw_recurring_shipping', wc_format_decimal( $signature['recurring_shipping'] ) );
 		}
+		if ( ! empty( $signature['recurring_shipping_method'] ) ) {
+			update_post_meta( $subscription->get_id(), '_rpsfw_recurring_shipping_method', sanitize_text_field( $signature['recurring_shipping_method'] ) );
+			update_post_meta( $subscription->get_id(), '_rpsfw_recurring_shipping_label', sanitize_text_field( isset( $signature['recurring_shipping_label'] ) ? $signature['recurring_shipping_label'] : '' ) );
+		}
+
+		// Recurring coupons: the discount inside the recurring amount, and
+		// when a limited one runs out.
+		RPSFW_Subscriptions_Coupons::store_record_discount( $subscription, $signature );
 
 		// The initial payment counts toward finite lengths (unless a free
 		// trial deferred it).
@@ -449,12 +457,21 @@ class RPSFW_Subscriptions_Manager {
 		$shipping_portion = max( 0.0, min( $shipping_portion, (float) $amount ) );
 		$product_portion  = max( 0.0, (float) $amount - $shipping_portion );
 
+		// Recurring coupon: list the full price as the line subtotal so the
+		// order shows the discount — only when the charge is the discounted
+		// amount the subscription is on, so an unexpected charge is never
+		// dressed up as a discount.
+		$discount = $subscription->get_recurring_discount();
+		if ( $discount > 0 && abs( (float) $amount - $subscription->get_recurring_amount() ) >= 0.01 ) {
+			$discount = 0.0;
+		}
+
 		$product = $subscription->get_product();
 		if ( $product ) {
 			$item = new WC_Order_Item_Product();
 			$item->set_product( $product );
 			$item->set_quantity( $subscription->get_quantity() );
-			$item->set_subtotal( $product_portion );
+			$item->set_subtotal( $product_portion + $discount );
 			$item->set_total( $product_portion );
 			$item->set_name( $subscription->get_item_name() ? $subscription->get_item_name() : $product->get_name() );
 			$order->add_item( $item );
@@ -463,14 +480,26 @@ class RPSFW_Subscriptions_Manager {
 			$item = new WC_Order_Item_Product();
 			$item->set_name( $subscription->get_item_name() ? $subscription->get_item_name() : __( 'Subscription renewal', 'restore-paypal-standard-for-woocommerce' ) );
 			$item->set_quantity( $subscription->get_quantity() );
-			$item->set_subtotal( $product_portion );
+			$item->set_subtotal( $product_portion + $discount );
 			$item->set_total( $product_portion );
 			$order->add_item( $item );
 		}
 
 		if ( $shipping_portion > 0 ) {
+			// The method chosen at checkout; subscriptions from before it was
+			// stored get a plain "Shipping" line.
+			$method = (string) get_post_meta( $subscription->get_id(), '_rpsfw_recurring_shipping_method', true );
+			$label  = (string) get_post_meta( $subscription->get_id(), '_rpsfw_recurring_shipping_label', true );
+
 			$shipping_item = new WC_Order_Item_Shipping();
-			$shipping_item->set_method_title( __( 'Shipping', 'restore-paypal-standard-for-woocommerce' ) );
+			$shipping_item->set_method_title( '' !== $label ? $label : __( 'Shipping', 'restore-paypal-standard-for-woocommerce' ) );
+			if ( '' !== $method ) {
+				$parts = explode( ':', $method );
+				$shipping_item->set_method_id( $parts[0] );
+				if ( isset( $parts[1] ) ) {
+					$shipping_item->set_instance_id( $parts[1] );
+				}
+			}
 			$shipping_item->set_total( $shipping_portion );
 			$order->add_item( $shipping_item );
 		}
@@ -502,6 +531,17 @@ class RPSFW_Subscriptions_Manager {
 			$order->set_total( (float) $amount );
 			$order->add_order_note(
 				__( 'Order total set to the amount charged by the payment processor (includes any tax and shipping).', 'restore-paypal-standard-for-woocommerce' )
+			);
+		}
+
+		if ( $discount > 0 ) {
+			$order->add_order_note(
+				sprintf(
+					/* translators: 1: discount amount, 2: coupon code(s) */
+					__( 'Includes a recurring coupon discount of %1$s (%2$s).', 'restore-paypal-standard-for-woocommerce' ),
+					wp_strip_all_tags( wc_price( $discount, array( 'currency' => $subscription->get_currency() ) ) ),
+					implode( ', ', RPSFW_Subscriptions_Coupons::get_renewal_coupon_codes( $subscription ) )
+				)
 			);
 		}
 

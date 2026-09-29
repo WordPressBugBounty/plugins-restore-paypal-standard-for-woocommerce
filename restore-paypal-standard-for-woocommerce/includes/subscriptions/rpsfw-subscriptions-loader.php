@@ -38,6 +38,9 @@ require_once dirname( __FILE__ ) . '/class-rpsfw-subscription-product.php';
 // Cart / checkout handling.
 require_once dirname( __FILE__ ) . '/class-rpsfw-subscriptions-cart.php';
 
+// Recurring coupon types.
+require_once dirname( __FILE__ ) . '/class-rpsfw-subscriptions-coupons.php';
+
 // Orchestration (record creation, renewals, lifecycle actions).
 require_once dirname( __FILE__ ) . '/class-rpsfw-subscriptions-manager.php';
 
@@ -153,6 +156,11 @@ function rpsfw_native_subscriptions_exist() {
  * WCS-presence check is reliable.
  */
 function rpsfw_subscriptions_init() {
+	// Subscription notes outlive the module (they stay in the database when
+	// it is switched off or WooCommerce Subscriptions takes over), so they
+	// are kept out of comment queries in every state.
+	RPSFW_Subscriptions_Post_Type::init_note_filters();
+
 	if ( ! class_exists( 'WooCommerce' ) ) {
 		return;
 	}
@@ -171,6 +179,10 @@ function rpsfw_subscriptions_init() {
 		}
 		return;
 	}
+
+	// Subscription coupon types stay registered even while the module is
+	// off, so WooCommerce never reads those coupons as cart discounts.
+	RPSFW_Subscriptions_Coupons::init_types();
 
 	// WooCommerce Subscriptions is NOT active below.
 	//
@@ -192,10 +204,12 @@ function rpsfw_subscriptions_init() {
 		RPSFW_Subscriptions_Admin::init();
 		RPSFW_Subscriptions_Emails::init();
 		RPSFW_Subscriptions_Roles::init();
+		RPSFW_Subscriptions_Coupons::init_servicing();
 
 		// Purchase surfaces.
 		RPSFW_Subscription_Product::init();
 		RPSFW_Subscriptions_Cart::init();
+		RPSFW_Subscriptions_Coupons::init();
 		RPSFW_Subscriptions_PayPal_Commerce::init_checkout();
 		RPSFW_Subscriptions_Stripe::init_checkout();
 	} elseif ( is_admin() ) {

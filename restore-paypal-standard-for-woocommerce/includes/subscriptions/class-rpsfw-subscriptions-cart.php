@@ -8,7 +8,7 @@
  *  - Enforce cart rules: one subscription per order; optionally allow
  *    mixing with one-time products (mixed checkout setting).
  *  - Free trials: the subscription line costs $0 today (the processor
- *    starts billing after the trial).
+ *    starts billing after the trial) and ships nothing today.
  *  - Sign-up fees: added as a cart fee line so totals and taxes are
  *    computed by WooCommerce.
  *  - Build the "cart signature" (recurring amount, initial total, trial,
@@ -23,8 +23,11 @@
  *
  * Pricing model (documented behaviour):
  *  - The product price is the recurring price. Renewals bill the recurring
- *    total = product price (incl. tax) × qty + shipping (when the product
- *    ships). Coupons apply to the FIRST payment only.
+ *    total = product price (incl. tax) × qty + renewal shipping (when the
+ *    product ships; rated for the subscriptions alone, see
+ *    get_cart_renewal_shipping()), less any recurring coupon
+ *    (RPSFW_Subscriptions_Coupons). Standard coupons apply to the FIRST
+ *    payment only.
  *
  * @package Restore_PayPal_Standard_For_WooCommerce
  */
@@ -53,6 +56,10 @@ class RPSFW_Subscriptions_Cart {
 
 		// Sign-up fees as a fee line.
 		add_action( 'woocommerce_cart_calculate_fees', array( __CLASS__, 'add_signup_fee' ) );
+
+		// Free trials ship nothing today; renewals pay their own shipping.
+		add_filter( 'woocommerce_cart_shipping_packages', array( __CLASS__, 'remove_trial_items_from_packages' ), 5 );
+		add_filter( 'woocommerce_shipping_free_shipping_is_available', array( __CLASS__, 'renewal_free_shipping_is_available' ), 20, 3 );
 
 		// Line item + totals display.
 		add_filter( 'woocommerce_get_item_data', array( __CLASS__, 'cart_item_data' ), 10, 2 );
@@ -93,6 +100,12 @@ class RPSFW_Subscriptions_Cart {
 		// BOTH surfaces for consistent behaviour.
 		add_action( 'woocommerce_after_checkout_validation', array( __CLASS__, 'validate_checkout_account' ), 10, 2 );
 		add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( __CLASS__, 'validate_store_api_account' ), 10, 2 );
+
+		// Renewal shipping: the renewals must be shippable to the customer's
+		// address, and on block checkout a cart that ships nothing today still
+		// needs a chosen shipping method.
+		add_action( 'woocommerce_after_checkout_validation', array( __CLASS__, 'validate_checkout_renewal_shipping' ), 10, 2 );
+		add_action( 'woocommerce_store_api_checkout_update_order_from_request', array( __CLASS__, 'prepare_store_api_renewal_shipping' ), 5, 1 );
 
 		// Snapshot the signature onto the order at checkout so finalization
 		// and record creation don't depend on the (volatile) cart/session.
@@ -280,6 +293,376 @@ class RPSFW_Subscriptions_Cart {
 	}
 
 	// -----------------------------------------------------------------
+	// Shipping.
+	// -----------------------------------------------------------------
+
+	/**
+	 * A free-trial subscription ships nothing today, so it comes out of
+	 * today's shipping packages and only what ships now is charged for. Its
+	 * shipping is charged with the renewals instead, as part of the recurring
+	 * amount (see get_cart_renewal_shipping()). The cart still needs
+	 * shipping, so the shipping address is still collected.
+	 *
+	 * @param array $packages Shipping packages.
+	 * @return array
+	 */
+	public static function remove_trial_items_from_packages( $packages ) {
+		if ( ! is_array( $packages ) ) {
+			return $packages;
+		}
+		$changed = false;
+		foreach ( $packages as $index => $package ) {
+			if ( empty( $package['contents'] ) || ! is_array( $package['contents'] ) ) {
+				continue;
+			}
+			foreach ( $package['contents'] as $key => $item ) {
+				if ( ! isset( $item['data'] ) || ! RPSFW_Subscription_Product::is_subscription( $item['data'] )
+					|| RPSFW_Subscription_Product::get_trial_length( $item['data'] ) < 1 ) {
+					continue;
+				}
+				if ( isset( $packages[ $index ]['contents_cost'], $item['line_total'] ) ) {
+					$packages[ $index ]['contents_cost'] -= (float) $item['line_total'];
+				}
+				unset( $packages[ $index ]['contents'][ $key ] );
+				$changed = true;
+			}
+			if ( empty( $packages[ $index ]['contents'] ) ) {
+				unset( $packages[ $index ] );
+			}
+		}
+		return $changed ? array_values( $packages ) : $packages;
+	}
+
+	/**
+	 * What each subscription in the cart pays for shipping on its renewals.
+	 *
+	 * Subscriptions renewing on the same schedule ship together, so each such
+	 * group is rated as one package of its own: the subscriptions at their
+	 * recurring price (after recurring coupons), to the customer's shipping
+	 * address. Its method is the one the customer chose at checkout when that
+	 * one also ships the renewals, otherwise the store's first method (local
+	 * pickup only when nothing else is offered). The group's cost, including
+	 * shipping tax, is split across its items in proportion to their
+	 * recurring lines, the remainder going to the last one.
+	 *
+	 * @param WC_Cart $cart Cart.
+	 * @return array[] Cart item key => array {
+	 *     @type float  $amount  Renewal shipping incl. tax.
+	 *     @type float  $display The same as the cart shows shipping (excl. tax when it shows prices excl. tax).
+	 *     @type string $method  Rate id, e.g. "flat_rate:3".
+	 *     @type string $label   Method name, e.g. "Flat rate".
+	 * }
+	 */
+	public static function get_cart_renewal_shipping( $cart ) {
+		if ( ! $cart instanceof WC_Cart || ! function_exists( 'wc_shipping_enabled' ) || ! wc_shipping_enabled() || ! WC()->shipping() ) {
+			return array();
+		}
+
+		$customer    = WC()->customer;
+		$destination = array(
+			'country'   => $customer ? $customer->get_shipping_country() : '',
+			'state'     => $customer ? $customer->get_shipping_state() : '',
+			'postcode'  => $customer ? $customer->get_shipping_postcode() : '',
+			'city'      => $customer ? $customer->get_shipping_city() : '',
+			'address'   => $customer ? $customer->get_shipping_address() : '',
+			'address_1' => $customer ? $customer->get_shipping_address() : '',
+			'address_2' => $customer ? $customer->get_shipping_address_2() : '',
+		);
+
+		// Recurring coupons reach the renewals. One that also gives free
+		// shipping and applies to every payment makes renewal shipping free;
+		// renewal shipping is set at checkout and never changes, so a coupon
+		// that runs out after some payments can't.
+		$coupon_codes  = array();
+		$free_shipping = false;
+		foreach ( $cart->get_coupons() as $code => $coupon ) {
+			if ( ! RPSFW_Subscriptions_Coupons::is_recurring_coupon( $coupon ) ) {
+				continue;
+			}
+			$coupon_codes[] = (string) $code;
+			if ( $coupon->get_free_shipping() && RPSFW_Subscriptions_Coupons::get_payment_limit( $coupon ) < 1 ) {
+				$free_shipping = true;
+			}
+		}
+
+		$discounts   = RPSFW_Subscriptions_Coupons::get_cart_recurring_discounts( $cart );
+		$display_inc = $cart->display_prices_including_tax();
+		$groups      = array();
+		foreach ( $cart->get_cart() as $key => $cart_item ) {
+			if ( empty( $cart_item['data'] ) || ! RPSFW_Subscription_Product::is_subscription( $cart_item['data'] ) ) {
+				continue;
+			}
+			// A fresh product object: the cart's is zero-priced during a trial.
+			$product_id = ! empty( $cart_item['variation_id'] ) ? $cart_item['variation_id'] : ( isset( $cart_item['product_id'] ) ? $cart_item['product_id'] : 0 );
+			$product    = $product_id ? wc_get_product( $product_id ) : false;
+			if ( ! $product || ! $product->needs_shipping() ) {
+				continue;
+			}
+
+			$qty      = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
+			$price    = (float) $product->get_price();
+			$discount = isset( $discounts[ $key ] ) ? (float) $discounts[ $key ]['discount'] : 0.0;
+			$unit     = max( 0.0, ( $price * $qty - $discount ) / $qty );
+
+			$subtotal_ex  = (float) wc_get_price_excluding_tax( $product, array( 'qty' => $qty, 'price' => $price ) );
+			$subtotal_inc = (float) wc_get_price_including_tax( $product, array( 'qty' => $qty, 'price' => $price ) );
+			$total_ex     = (float) wc_get_price_excluding_tax( $product, array( 'qty' => $qty, 'price' => $unit ) );
+			$total_inc    = (float) wc_get_price_including_tax( $product, array( 'qty' => $qty, 'price' => $unit ) );
+
+			$group = implode(
+				'|',
+				array(
+					RPSFW_Subscription_Product::get_period( $product ),
+					RPSFW_Subscription_Product::get_interval( $product ),
+					RPSFW_Subscription_Product::get_trial_length( $product ),
+					RPSFW_Subscription_Product::get_trial_period( $product ),
+				)
+			);
+
+			$groups[ $group ]['contents'][ $key ] = array_merge(
+				$cart_item,
+				array(
+					'data'              => $product,
+					'line_subtotal'     => $subtotal_ex,
+					'line_subtotal_tax' => $subtotal_inc - $subtotal_ex,
+					'line_total'        => $total_ex,
+					'line_tax'          => $total_inc - $total_ex,
+				)
+			);
+			$groups[ $group ]['weights'][ $key ] = $subtotal_inc;
+			$groups[ $group ]['subtotal']        = ( isset( $groups[ $group ]['subtotal'] ) ? $groups[ $group ]['subtotal'] : 0.0 ) + ( $display_inc ? $subtotal_inc : $subtotal_ex );
+			$groups[ $group ]['total']           = ( isset( $groups[ $group ]['total'] ) ? $groups[ $group ]['total'] : 0.0 ) + ( $display_inc ? $total_inc : $total_ex );
+		}
+		if ( empty( $groups ) ) {
+			return array();
+		}
+
+		$result = array();
+		foreach ( $groups as $group => $data ) {
+			$package = array(
+				'contents'        => $data['contents'],
+				'contents_cost'   => array_sum( wp_list_pluck( $data['contents'], 'line_total' ) ),
+				'applied_coupons' => $coupon_codes,
+				'user'            => array( 'ID' => get_current_user_id() ),
+				'destination'     => $destination,
+				'cart_subtotal'   => $data['subtotal'],
+				// Marks a renewal package (see renewal_free_shipping_is_available()).
+				'rpsfw_renewal'   => array(
+					'subtotal'      => round( $data['subtotal'], 2 ),
+					'total'         => round( $data['total'], 2 ),
+					'free_shipping' => $free_shipping,
+				),
+			);
+
+			// Its own session key, so today's cached rates are left alone.
+			$rated = WC()->shipping()->calculate_shipping_for_package( $package, 'rpsfw_renewal_' . md5( $group ) );
+			$rate  = self::pick_renewal_rate( is_array( $rated ) && ! empty( $rated['rates'] ) ? $rated['rates'] : array(), array_keys( $data['contents'] ) );
+			if ( ! $rate ) {
+				continue;
+			}
+
+			$amount  = round( (float) $rate->get_cost() + array_sum( array_map( 'floatval', (array) $rate->get_taxes() ) ), 2 );
+			$display = $display_inc ? $amount : round( (float) $rate->get_cost(), 2 );
+			$shares  = self::split_amount( $amount, $data['weights'] );
+			$shown   = self::split_amount( $display, $data['weights'] );
+			foreach ( $shares as $key => $share ) {
+				$result[ $key ] = array(
+					'amount'  => $share,
+					'display' => $shown[ $key ],
+					'method'  => (string) $rate->get_id(),
+					'label'   => wp_strip_all_tags( (string) $rate->get_label() ),
+				);
+			}
+		}
+		return $result;
+	}
+
+	/**
+	 * Split an amount in proportion to weights, the remainder going to the
+	 * last key so the shares always add up to the amount.
+	 *
+	 * @param float   $amount  Amount.
+	 * @param float[] $weights Key => weight.
+	 * @return float[] Key => share.
+	 */
+	private static function split_amount( $amount, $weights ) {
+		$total     = array_sum( $weights );
+		$allocated = 0.0;
+		$keys      = array_keys( $weights );
+		$last_key  = end( $keys );
+		$shares    = array();
+		foreach ( $weights as $key => $weight ) {
+			if ( $key === $last_key ) {
+				$share = round( $amount - $allocated, 2 );
+			} else {
+				$share      = $total > 0 ? round( $amount * ( $weight / $total ), 2 ) : 0.0;
+				$allocated += $share;
+			}
+			$shares[ $key ] = max( 0.0, $share );
+		}
+		return $shares;
+	}
+
+	/**
+	 * The renewal rate: the method chosen at checkout for the shipment holding
+	 * these items (or for today's first shipment, when they ship nothing
+	 * today) when it is offered for the renewals too, otherwise the first
+	 * method that isn't local pickup, otherwise the first one.
+	 *
+	 * @param WC_Shipping_Rate[] $rates     Renewal rates, keyed by rate id.
+	 * @param string[]           $item_keys Cart item keys in the renewal package.
+	 * @return WC_Shipping_Rate|null
+	 */
+	private static function pick_renewal_rate( $rates, $item_keys ) {
+		if ( empty( $rates ) ) {
+			return null;
+		}
+
+		// Only today's shipments count: the session keeps choices made for
+		// packages the cart no longer has.
+		$chosen = WC()->session ? (array) WC()->session->get( 'chosen_shipping_methods', array() ) : array();
+		$pick   = '';
+		foreach ( WC()->shipping()->get_packages() as $index => $package ) {
+			if ( empty( $chosen[ $index ] ) ) {
+				continue;
+			}
+			if ( '' === $pick ) {
+				$pick = (string) $chosen[ $index ];
+			}
+			if ( ! empty( $package['contents'] ) && array_intersect_key( $package['contents'], array_flip( $item_keys ) ) ) {
+				$pick = (string) $chosen[ $index ];
+				break;
+			}
+		}
+		if ( '' !== $pick && isset( $rates[ $pick ] ) ) {
+			return $rates[ $pick ];
+		}
+
+		foreach ( $rates as $rate ) {
+			if ( ! in_array( $rate->get_method_id(), array( 'local_pickup', 'pickup_location' ), true ) ) {
+				return $rate;
+			}
+		}
+		return reset( $rates );
+	}
+
+	/**
+	 * Why the renewals can't be shipped to the customer's address, or '' when
+	 * they can. WooCommerce only checks shipping for what ships today, which
+	 * leaves out a subscription on a free trial.
+	 *
+	 * @return string
+	 */
+	public static function renewal_shipping_error() {
+		if ( ! function_exists( 'WC' ) || ! WC()->cart || ! self::cart_contains_subscription() || ! WC()->cart->needs_shipping() ) {
+			return '';
+		}
+		$renewal = self::get_cart_renewal_shipping( WC()->cart );
+		foreach ( WC()->cart->get_cart() as $key => $cart_item ) {
+			if ( empty( $cart_item['data'] ) || ! RPSFW_Subscription_Product::is_subscription( $cart_item['data'] ) || ! $cart_item['data']->needs_shipping() ) {
+				continue;
+			}
+			if ( ! isset( $renewal[ $key ] ) ) {
+				return __( 'No shipping method is available for the renewals of your subscription. Please double check your address, or contact us if you need any help.', 'restore-paypal-standard-for-woocommerce' );
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Classic checkout: the renewals must be shippable to the address.
+	 *
+	 * @param array    $data   Posted checkout data.
+	 * @param WP_Error $errors Validation errors collector.
+	 */
+	public static function validate_checkout_renewal_shipping( $data, $errors ) {
+		// PayPal Commerce checks this itself, before its approval window opens.
+		if ( isset( $data['payment_method'] ) && 'rpsfw_paypal_commerce' === $data['payment_method'] ) {
+			return;
+		}
+		// WooCommerce already refused shipping to this address for today.
+		if ( ! is_wp_error( $errors ) || $errors->get_error_messages( 'shipping' ) ) {
+			return;
+		}
+		$message = self::renewal_shipping_error();
+		if ( $message ) {
+			$errors->add( 'shipping', $message );
+		}
+	}
+
+	/**
+	 * Block (Store API) checkout: the renewals must be shippable to the
+	 * address, and a cart that ships nothing today (free trials only) takes
+	 * the renewals' method as its chosen shipping method — WooCommerce
+	 * refuses an order that needs shipping without one. It is stored under a
+	 * key of its own, apart from today's shipments. Runs before WooCommerce
+	 * validates the order.
+	 *
+	 * @param WC_Order $order Draft order built from the request.
+	 * @throws \Automattic\WooCommerce\StoreApi\Exceptions\RouteException When the renewals can't be shipped.
+	 * @throws Exception Fallback when the Store API exception class is unavailable.
+	 */
+	public static function prepare_store_api_renewal_shipping( $order ) {
+		if ( ! self::cart_contains_subscription() || ! WC()->session || ! WC()->cart->needs_shipping() ) {
+			return;
+		}
+
+		// PayPal Commerce checks this itself, before its approval window opens.
+		$payment_method = ( $order instanceof WC_Order ) ? $order->get_payment_method() : '';
+		$message        = 'rpsfw_paypal_commerce' === $payment_method ? '' : self::renewal_shipping_error();
+		if ( $message ) {
+			if ( class_exists( '\Automattic\WooCommerce\StoreApi\Exceptions\RouteException' ) ) {
+				throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException( 'rpsfw_sub_no_renewal_shipping', esc_html( $message ), 400 );
+			}
+			throw new Exception( esc_html( $message ) );
+		}
+
+		$chosen = (array) WC()->session->get( 'chosen_shipping_methods', array() );
+		if ( ! empty( $chosen ) || WC()->shipping()->get_packages() ) {
+			return;
+		}
+		$renewal = self::get_cart_renewal_shipping( WC()->cart );
+		$first   = $renewal ? reset( $renewal ) : null;
+		WC()->session->set( 'chosen_shipping_methods', array( 'rpsfw_renewal' => $first ? $first['method'] : 'rpsfw_renewal' ) );
+	}
+
+	/**
+	 * Free shipping for a renewal package: WooCommerce judges its minimum
+	 * amount and coupon rule against the cart (today's order), so judge them
+	 * against the renewal instead.
+	 *
+	 * @param bool                      $is_available Availability for today's order.
+	 * @param array                     $package      Shipping package.
+	 * @param WC_Shipping_Free_Shipping $method       Free shipping method.
+	 * @return bool
+	 */
+	public static function renewal_free_shipping_is_available( $is_available, $package, $method = null ) {
+		if ( empty( $package['rpsfw_renewal'] ) || ! is_array( $package['rpsfw_renewal'] ) || ! is_object( $method ) ) {
+			return $is_available;
+		}
+		$renewal = $package['rpsfw_renewal'];
+
+		$requires   = isset( $method->requires ) ? (string) $method->requires : '';
+		$min_amount = isset( $method->min_amount ) ? (float) $method->min_amount : 0.0;
+		$amount     = ( isset( $method->ignore_discounts ) && 'yes' === $method->ignore_discounts ) ? $renewal['subtotal'] : $renewal['total'];
+		$has_min    = $amount >= $min_amount;
+		$has_coupon = ! empty( $renewal['free_shipping'] );
+
+		switch ( $requires ) {
+			case 'min_amount':
+				return $has_min;
+			case 'coupon':
+				return $has_coupon;
+			case 'both':
+				return $has_min && $has_coupon;
+			case 'either':
+				return $has_min || $has_coupon;
+			default:
+				return true;
+		}
+	}
+
+	// -----------------------------------------------------------------
 	// Display.
 	// -----------------------------------------------------------------
 
@@ -300,19 +683,47 @@ class RPSFW_Subscriptions_Cart {
 		$qty     = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
 
 		// Recurring price for display: the product's real price (the cart
-		// price may have been zeroed for a trial).
+		// price may have been zeroed for a trial), less any recurring coupon.
+		// This line is also the only renewal summary block checkout shows, so
+		// it carries the coupon's effect too.
 		$real_product = wc_get_product( $product->get_id() );
 		$unit_price   = $real_product ? (float) $real_product->get_price() : 0.0;
-		$display      = function_exists( 'wc_get_price_to_display' ) && $real_product
-			? wc_get_price_to_display( $real_product, array( 'qty' => $qty, 'price' => $unit_price ) )
-			: $unit_price * $qty;
+		$line_display = function ( $line_discount ) use ( $real_product, $qty, $unit_price ) {
+			$price = max( 0.0, ( $unit_price * $qty - $line_discount ) / $qty );
+			return function_exists( 'wc_get_price_to_display' ) && $real_product
+				? wc_get_price_to_display( $real_product, array( 'qty' => $qty, 'price' => $price, 'display_context' => 'cart' ) )
+				: $price * $qty;
+		};
 
-		$value = sprintf(
-			/* translators: 1: recurring price, 2: schedule (e.g. "every month") */
-			__( '%1$s %2$s', 'restore-paypal-standard-for-woocommerce' ),
-			wp_strip_all_tags( wc_price( $display ) ),
-			rpsfw_format_subscription_period( RPSFW_Subscription_Product::get_interval( $product ), RPSFW_Subscription_Product::get_period( $product ) )
+		$discounts = RPSFW_Subscriptions_Coupons::get_cart_recurring_discounts();
+		$discount  = ( isset( $cart_item['key'] ) && isset( $discounts[ $cart_item['key'] ] ) ) ? $discounts[ $cart_item['key'] ] : null;
+		$now       = $line_display( $discount ? $discount['discount'] : 0.0 );
+		$after     = $line_display( $discount ? $discount['discount_after'] : 0.0 );
+		$schedule  = RPSFW_Subscriptions_Coupons::get_discount_schedule(
+			( $discount && abs( $after - $now ) >= 0.01 ) ? $discount['limit'] : 0,
+			RPSFW_Subscription_Product::get_trial_length( $product ) > 0,
+			RPSFW_Subscription_Product::get_length( $product )
 		);
+
+		$value = rpsfw_format_recurring_amount(
+			$schedule['starts_full'] ? $after : $now,
+			get_woocommerce_currency(),
+			RPSFW_Subscription_Product::get_interval( $product ),
+			RPSFW_Subscription_Product::get_period( $product ),
+			$schedule['renewals'],
+			$after,
+			true
+		);
+
+		// Renewal shipping (on block checkout this is the only place it shows).
+		$shipping = ( ! empty( $cart_item['key'] ) && WC()->cart ) ? self::get_cart_renewal_shipping( WC()->cart ) : array();
+		if ( ! empty( $shipping[ $cart_item['key'] ] ) && $shipping[ $cart_item['key'] ]['display'] > 0 ) {
+			$value .= ', ' . sprintf(
+				/* translators: %s: shipping amount */
+				__( 'plus %s shipping each renewal', 'restore-paypal-standard-for-woocommerce' ),
+				wp_strip_all_tags( wc_price( $shipping[ $cart_item['key'] ]['display'] ) )
+			);
+		}
 
 		$trial = rpsfw_format_subscription_trial( RPSFW_Subscription_Product::get_trial_length( $product ), RPSFW_Subscription_Product::get_trial_period( $product ) );
 		if ( $trial ) {
@@ -322,8 +733,8 @@ class RPSFW_Subscriptions_Cart {
 		$length = RPSFW_Subscription_Product::get_length( $product );
 		if ( $length > 0 ) {
 			$value .= ', ' . sprintf(
-				/* translators: %d: number of payments */
-				_n( '%d payment', '%d payments', $length, 'restore-paypal-standard-for-woocommerce' ),
+				/* translators: %d: total number of payments, including the first one */
+				_n( '%d payment in total', '%d payments in total', $length, 'restore-paypal-standard-for-woocommerce' ),
 				$length
 			);
 		}
@@ -360,8 +771,33 @@ class RPSFW_Subscriptions_Cart {
 					if ( $multiple ) {
 						echo esc_html( $item['plan_name'] ) . ': ';
 					}
-					echo wp_kses_post( wc_price( $item['recurring_amount'], array( 'currency' => $signature['currency'] ) ) );
-					echo ' ' . esc_html( rpsfw_format_subscription_period( $item['interval'], $item['period'] ) );
+					echo wp_kses_post(
+						rpsfw_format_recurring_amount(
+							$item['recurring_amount'],
+							$signature['currency'],
+							$item['interval'],
+							$item['period'],
+							isset( $item['discounted_renewals'] ) ? $item['discounted_renewals'] : 0,
+							isset( $item['recurring_amount_full'] ) ? $item['recurring_amount_full'] : $item['recurring_amount']
+						)
+					);
+					if ( ! empty( $item['recurring_shipping'] ) && $item['recurring_shipping'] > 0 ) {
+						$shipping = wp_strip_all_tags( wc_price( $item['recurring_shipping'], array( 'currency' => $signature['currency'] ) ) );
+						echo '<br><small>' . esc_html(
+							! empty( $item['recurring_shipping_label'] )
+								? sprintf(
+									/* translators: 1: shipping amount, 2: shipping method name e.g. "Flat rate" */
+									__( 'Includes %1$s shipping (%2$s).', 'restore-paypal-standard-for-woocommerce' ),
+									$shipping,
+									$item['recurring_shipping_label']
+								)
+								: sprintf(
+									/* translators: %s: shipping amount */
+									__( 'Includes %s shipping.', 'restore-paypal-standard-for-woocommerce' ),
+									$shipping
+								)
+						) . '</small>';
+					}
 					if ( $item['trial_length'] > 0 ) {
 						echo '<br><small>' . esc_html(
 							sprintf(
@@ -682,29 +1118,47 @@ class RPSFW_Subscriptions_Cart {
 	 * Commerce consumes, since it is limited to single-subscription carts.
 	 *
 	 * Amounts:
-	 *  - Per item, recurring_amount: what that subscription's renewals
-	 *    bill — its line (incl. tax) + its share of the cart's shipping
-	 *    (incl. shipping tax) when the product ships. Shipping is split
-	 *    across shippable subscription items proportionally to their
-	 *    recurring lines. Coupons do NOT recur.
+	 *  - Per item, recurring_amount: what that subscription's first renewal
+	 *    bills — its line (incl. tax, less recurring coupons) + its renewal
+	 *    shipping (incl. shipping tax) when the product ships. Standard
+	 *    coupons do NOT recur.
+	 *  - Per item, recurring_shipping / recurring_shipping_method /
+	 *    recurring_shipping_label: that renewal shipping, its rate id and
+	 *    method name (see get_cart_renewal_shipping()).
+	 *  - Per item, discounted_renewals / recurring_amount_full: when a
+	 *    recurring coupon is limited to a number of payments, renewals bill
+	 *    recurring_amount for discounted_renewals renewals and
+	 *    recurring_amount_full after that. discounted_renewals is 0 when
+	 *    the amount never changes after checkout (recurring_amount_full is
+	 *    then equal to recurring_amount).
+	 *  - Per item, recurring_discount / recurring_discount_full: the coupon
+	 *    discount (incl. tax) inside those two amounts; recurring_coupons:
+	 *    code => payment limit (0 = every payment) of the coupons involved.
 	 *  - initial_total: the cart grand total (what WooCommerce charges
 	 *    today) — includes sign-up fee lines, trial zeroing, coupons,
 	 *    shipping and taxes.
 	 *  - non_subscription_amount: line totals (incl. tax) of one-time
 	 *    products in a mixed cart.
-	 *  - expected_sub_initial: what the processors would charge today for
-	 *    the subscriptions alone with no coupons — used to compute the
-	 *    initial reconciliation discount.
+	 *  - expected_sub_initial: what Stripe's first invoices would bill for
+	 *    the subscriptions alone before reconciliation (each non-trial
+	 *    item's recurring_amount plus every sign-up fee) — used to compute
+	 *    the initial reconciliation discount.
 	 *
+	 * @param bool $recalculate Recalculate cart totals first. Pass false from
+	 *                          contexts that may run inside a totals
+	 *                          calculation (gateway availability checks); the
+	 *                          last calculated totals are used then.
 	 * @return array|false
 	 */
-	public static function build_cart_signature() {
+	public static function build_cart_signature( $recalculate = true ) {
 		if ( ! function_exists( 'WC' ) || ! WC()->cart || WC()->cart->is_empty() ) {
 			return false;
 		}
 
 		$cart = WC()->cart;
-		$cart->calculate_totals();
+		if ( $recalculate ) {
+			$cart->calculate_totals();
+		}
 
 		$sub_cart_items = self::get_subscription_cart_items();
 		if ( empty( $sub_cart_items ) ) {
@@ -712,9 +1166,12 @@ class RPSFW_Subscriptions_Cart {
 		}
 
 		// First pass: per-item recurring lines (fresh product objects so the
-		// trial-zeroed cart price doesn't leak into the recurring amount).
-		$items                     = array();
-		$shippable_recurring_total = 0.0;
+		// trial-zeroed cart price doesn't leak into the recurring amount),
+		// before and after recurring coupons.
+		$items               = array();
+		$discounted_lines    = array();
+		$cart_keys           = array();
+		$recurring_discounts = RPSFW_Subscriptions_Coupons::get_cart_recurring_discounts( $cart );
 
 		foreach ( $sub_cart_items as $cart_item ) {
 			$qty          = isset( $cart_item['quantity'] ) ? max( 1, (int) $cart_item['quantity'] ) : 1;
@@ -751,41 +1208,68 @@ class RPSFW_Subscriptions_Cart {
 				'trial_days'     => self::trial_to_days( $trial_length, $trial_period ),
 			);
 
-			if ( $item['needs_shipping'] ) {
-				$shippable_recurring_total += $recurring_line;
-			}
+			$cart_key = isset( $cart_item['key'] ) ? $cart_item['key'] : '';
+			$discount = ( $cart_key && isset( $recurring_discounts[ $cart_key ] ) ) ? $recurring_discounts[ $cart_key ] : null;
 
-			$items[] = $item;
+			$discounted_lines[] = $discount
+				? array(
+					'now'     => RPSFW_Subscriptions_Coupons::discounted_line_including_tax( $product, $qty, $unit_price, $discount['discount'] ),
+					'after'   => RPSFW_Subscriptions_Coupons::discounted_line_including_tax( $product, $qty, $unit_price, $discount['discount_after'] ),
+					'limit'   => $discount['limit'],
+					'coupons' => $discount['coupons'],
+				)
+				: array(
+					'now'     => $recurring_line,
+					'after'   => $recurring_line,
+					'limit'   => 0,
+					'coupons' => array(),
+				);
+
+			$items[]     = $item;
+			$cart_keys[] = $cart_key;
 		}
 
 		if ( empty( $items ) ) {
 			return false;
 		}
 
-		// Second pass: split the cart's shipping (incl. shipping tax) across
-		// shippable subscription items, proportional to their recurring
-		// lines, with the remainder on the last shippable item so the
-		// shares always sum to the full shipping amount.
-		$cart_shipping       = round( (float) $cart->get_shipping_total() + (float) $cart->get_shipping_tax(), 2 );
-		$allocated           = 0.0;
-		$last_shippable_key  = null;
+		// Second pass: each item's renewal shipping (incl. shipping tax),
+		// rated for the subscriptions alone — not today's shipping, which a
+		// free trial doesn't have and one-time products add to.
+		$renewal_shipping = self::get_cart_renewal_shipping( $cart );
 		foreach ( $items as $key => $item ) {
-			if ( $item['needs_shipping'] ) {
-				$last_shippable_key = $key;
+			$shipping = ( $cart_keys[ $key ] && isset( $renewal_shipping[ $cart_keys[ $key ] ] ) ) ? $renewal_shipping[ $cart_keys[ $key ] ] : null;
+			$share    = $shipping ? (float) $shipping['amount'] : 0.0;
+
+			// Recurring coupons: the amount while every coupon applies, and the
+			// amount once any limited ones have run out.
+			$lines        = $discounted_lines[ $key ];
+			$undiscounted = round( $item['recurring_line'] + $share, 2 );
+			$now          = round( $lines['now'] + $share, 2 );
+			$after        = round( $lines['after'] + $share, 2 );
+			$schedule     = RPSFW_Subscriptions_Coupons::get_discount_schedule(
+				abs( $after - $now ) >= 0.01 ? $lines['limit'] : 0,
+				$item['trial_length'] > 0,
+				$item['length']
+			);
+			$next         = $schedule['starts_full'] ? $after : $now;
+			$full         = $schedule['renewals'] > 0 ? $after : $next;
+			$coupons      = $lines['coupons'];
+			if ( ! $schedule['renewals'] && ! $schedule['starts_full'] ) {
+				// No price change after checkout: any payment limit covers
+				// every payment this subscription makes.
+				$coupons = array_map( '__return_zero', $coupons );
 			}
-		}
-		foreach ( $items as $key => $item ) {
-			$share = 0.0;
-			if ( $item['needs_shipping'] && $cart_shipping > 0 ) {
-				if ( $key === $last_shippable_key ) {
-					$share = round( $cart_shipping - $allocated, 2 );
-				} elseif ( $shippable_recurring_total > 0 ) {
-					$share      = round( $cart_shipping * ( $item['recurring_line'] / $shippable_recurring_total ), 2 );
-					$allocated += $share;
-				}
-			}
-			$items[ $key ]['recurring_shipping'] = max( 0.0, $share );
-			$items[ $key ]['recurring_amount']   = round( $item['recurring_line'] + $items[ $key ]['recurring_shipping'], 2 );
+
+			$items[ $key ]['recurring_shipping']        = $share;
+			$items[ $key ]['recurring_shipping_method'] = $shipping ? $shipping['method'] : '';
+			$items[ $key ]['recurring_shipping_label']  = $shipping ? $shipping['label'] : '';
+			$items[ $key ]['recurring_amount']          = $next;
+			$items[ $key ]['recurring_amount_full']     = $full;
+			$items[ $key ]['discounted_renewals']       = $schedule['renewals'];
+			$items[ $key ]['recurring_discount']        = max( 0.0, round( $undiscounted - $next, 2 ) );
+			$items[ $key ]['recurring_discount_full']   = max( 0.0, round( $undiscounted - $full, 2 ) );
+			$items[ $key ]['recurring_coupons']         = $coupons;
 		}
 
 		// One-time portion of a mixed cart (line totals incl. tax).
@@ -798,9 +1282,12 @@ class RPSFW_Subscriptions_Cart {
 		}
 		$non_subscription_amount = round( $non_subscription_amount, 2 );
 
-		// What the processors would charge today for the subscriptions with
-		// no coupons: each non-trial item's recurring amount plus all
-		// sign-up fees.
+		// What Stripe's first invoices bill for the subscriptions before
+		// reconciliation: each non-trial item's recurring price (its first
+		// renewal amount) plus all sign-up fees. The gap to what WooCommerce
+		// charges today becomes a one-time discount (standard coupons, a
+		// recurring coupon limited to the first payment) or charge (shipping
+		// for one-time products, for example).
 		$expected_sub_initial = 0.0;
 		foreach ( $items as $item ) {
 			if ( $item['trial_length'] < 1 ) {
@@ -817,25 +1304,32 @@ class RPSFW_Subscriptions_Cart {
 		$first = $items[0];
 
 		$signature = array(
-			'product_id'              => $first['product_id'],
-			'variation_id'            => $first['variation_id'],
-			'quantity'                => $first['quantity'],
-			'plan_name'               => $first['plan_name'],
-			'currency'                => get_woocommerce_currency(),
-			'recurring_amount'        => $first['recurring_amount'],
-			'recurring_shipping'      => $first['recurring_shipping'],
-			'initial_total'           => $initial_total,
-			'non_subscription_amount' => $non_subscription_amount,
-			'signup_fee'              => $first['signup_fee'],
-			'period'                  => $first['period'],
-			'interval'                => $first['interval'],
-			'length'                  => $first['length'],
-			'trial_length'            => $first['trial_length'],
-			'trial_period'            => $first['trial_period'],
-			'trial_days'              => $first['trial_days'],
-			'sub_count'               => count( $items ),
-			'expected_sub_initial'    => round( $expected_sub_initial, 2 ),
-			'items'                   => $items,
+			'product_id'                => $first['product_id'],
+			'variation_id'              => $first['variation_id'],
+			'quantity'                  => $first['quantity'],
+			'plan_name'                 => $first['plan_name'],
+			'currency'                  => get_woocommerce_currency(),
+			'recurring_amount'          => $first['recurring_amount'],
+			'recurring_amount_full'     => $first['recurring_amount_full'],
+			'discounted_renewals'       => $first['discounted_renewals'],
+			'recurring_discount'        => $first['recurring_discount'],
+			'recurring_discount_full'   => $first['recurring_discount_full'],
+			'recurring_coupons'         => $first['recurring_coupons'],
+			'recurring_shipping'        => $first['recurring_shipping'],
+			'recurring_shipping_method' => $first['recurring_shipping_method'],
+			'recurring_shipping_label'  => $first['recurring_shipping_label'],
+			'initial_total'             => $initial_total,
+			'non_subscription_amount'   => $non_subscription_amount,
+			'signup_fee'                => $first['signup_fee'],
+			'period'                    => $first['period'],
+			'interval'                  => $first['interval'],
+			'length'                    => $first['length'],
+			'trial_length'              => $first['trial_length'],
+			'trial_period'              => $first['trial_period'],
+			'trial_days'                => $first['trial_days'],
+			'sub_count'                 => count( $items ),
+			'expected_sub_initial'      => round( $expected_sub_initial, 2 ),
+			'items'                     => $items,
 		);
 
 		return apply_filters( 'rpsfw_subscription_cart_signature', $signature, $cart );
@@ -907,7 +1401,8 @@ class RPSFW_Subscriptions_Cart {
 			return false;
 		}
 		$signature = $order->get_meta( self::ORDER_SIGNATURE_META );
-		if ( is_array( $signature ) && ! empty( $signature['recurring_amount'] ) ) {
+		// isset, not empty: a 100% recurring coupon makes the amount 0.
+		if ( is_array( $signature ) && isset( $signature['recurring_amount'] ) && ! empty( $signature['product_id'] ) ) {
 			return $signature;
 		}
 		return self::build_cart_signature();

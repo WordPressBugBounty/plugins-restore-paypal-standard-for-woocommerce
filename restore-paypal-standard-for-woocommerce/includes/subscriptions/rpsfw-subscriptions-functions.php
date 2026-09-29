@@ -280,6 +280,48 @@ function rpsfw_format_subscription_trial( $length, $period ) {
 }
 
 /**
+ * Recurring amount with its schedule, e.g. "$29.99 every month", or while a
+ * limited coupon discount is running "$19.99 every month for 2 payments,
+ * then $29.99 every month".
+ *
+ * @param float  $amount     Amount of the next payment(s).
+ * @param string $currency   Currency code.
+ * @param int    $interval   Billing interval.
+ * @param string $period     day|week|month|year.
+ * @param int    $discounted Payments still billed at $amount before $full applies (0 = $amount for good).
+ * @param float  $full       Amount once the discounted payments have run out.
+ * @param bool   $plain      Plain text instead of HTML.
+ * @return string
+ */
+function rpsfw_format_recurring_amount( $amount, $currency, $interval, $period, $discounted = 0, $full = 0.0, $plain = false ) {
+	$format_price = function ( $value ) use ( $currency, $plain ) {
+		$html = wc_price( $value, array( 'currency' => $currency ) );
+		return $plain ? wp_strip_all_tags( $html ) : $html;
+	};
+
+	$schedule   = rpsfw_format_subscription_period( $interval, $period );
+	$discounted = max( 0, (int) $discounted );
+
+	if ( $discounted > 0 ) {
+		return sprintf(
+			/* translators: 1: discounted amount, 2: billing schedule (e.g. "every month"), 3: number of discounted payments, 4: full amount */
+			_n( '%1$s %2$s for %3$d payment, then %4$s %2$s', '%1$s %2$s for %3$d payments, then %4$s %2$s', $discounted, 'restore-paypal-standard-for-woocommerce' ),
+			$format_price( $amount ),
+			$schedule,
+			$discounted,
+			$format_price( $full )
+		);
+	}
+
+	return sprintf(
+		/* translators: 1: recurring amount, 2: billing schedule (e.g. "every month") */
+		_x( '%1$s %2$s', 'formatted recurring total: price then schedule', 'restore-paypal-standard-for-woocommerce' ),
+		$format_price( $amount ),
+		$schedule
+	);
+}
+
+/**
  * Compute the next payment date from "now" plus one billing cycle.
  *
  * Used as a local estimate; webhook-reported dates always take precedence.

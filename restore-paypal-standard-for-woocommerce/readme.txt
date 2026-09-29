@@ -5,7 +5,7 @@ Tags: woocommerce, paypal, stripe, payment gateway, subscriptions
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 5.6
-Stable tag: 4.0.1
+Stable tag: 4.1.0
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -138,6 +138,33 @@ We're here to help! Please create a support post in the [support forum](https://
 8. PayPal Pay Later Settings Page
 
 == Changelog ==
+
+= 4.1.0 =
+* New - Subscription coupons: "Fixed subscription discount" and "Percentage subscription discount" coupon types, with an optional "Number of payments to discount" limit (the same as WooCommerce Subscriptions' "Active for x payments"). Works with Stripe and PayPal, for built-in subscriptions and WooCommerce Subscriptions. With Stripe, the discounted payments and the full price after them are set up on Stripe at checkout, so Stripe switches to the full price on its own
+* New - Free trials with shipping now work like WooCommerce Subscriptions: nothing ships or is charged for shipping during the trial, and each renewal charges its own shipping. Renewal shipping is shown at checkout, on the subscription, and in My Account, and renewal orders show the shipping method
+* Enhancement - PayPal can now bill a coupon that's limited to a number of payments together with a free trial, sign-up fee, or one-time products (PayPal was hidden for these carts before)
+* Enhancement - Stripe now collects everything due at checkout, such as shipping for one-time products, with the subscription's first payment
+* Enhancement - The Stripe test mode summary shows when a limited coupon ends, e.g. "$4.00 every day for 2 payments, then $5.00 every day"
+* Enhancement - Subscriptions limited to a number of payments now say "5 payments in total" at checkout and on the order screen, so it's clear the first payment is included
+* Fix - Security: hardened subscription checkout so each PayPal or Stripe subscription can pay for only one order, and PayPal subscriptions the buyer hasn't approved are refused
+* Fix - Security: an order is now marked paid only when its PayPal or Stripe subscription is exactly the one made for that checkout and bills what the order says, both at checkout and when Stripe's webhook completes the order
+* Fix - Stripe: on stores using WooCommerce's classic order storage (HPOS off), Stripe webhooks could act on the wrong order or subscription, such as recording a refund or a cancellation on the newest one. They now find the exact order
+* Fix - WooCommerce Subscriptions: when "Stop renewing after" ends a subscription, it is now also cancelled on Stripe and PayPal
+* Fix - WooCommerce Subscriptions with PayPal: subscriptions billed every 2 or more periods with "Stop renewing after" now get the right number of payments on PayPal (every 2 months for 12 months = 6 payments)
+* Fix - WooCommerce Subscriptions with Stripe: a limited coupon's price plan is now set up on Stripe even when the buyer leaves before the checkout page finishes
+* Fix - WooCommerce Subscriptions with PayPal: a repeated PayPal renewal notice no longer creates a second renewal order on stores using HPOS
+* Fix - Stripe: pausing a subscription that has a coupon price plan and a limited number of payments no longer removes its end date on Stripe
+* Fix - Stripe: cancelling a subscription that has a coupon price plan no longer gives the customer a Stripe credit for the unused time, the same as subscriptions without a coupon
+* Fix - Stripe free trials now bill the correct renewal price when a coupon is entered, or the address changes, after the checkout page has loaded
+* Fix - Changing a Stripe subscription's price no longer creates an extra $0 renewal order
+* Fix - WooCommerce Subscriptions: a limited coupon is now removed after its last discounted payment, so renewal orders match what Stripe and PayPal charge
+* Fix - WooCommerce Subscriptions with Stripe: a limited coupon's discounted payments now start after the free trial, and the trial no longer ends early
+* Fix - PayPal: the first payment after a free trial is now recorded as a renewal order
+* Fix - Block checkout now shows the reason when PayPal can't start a subscription (for example, no shipping for renewals to that address) instead of doing nothing
+* Fix - Block checkout: the Stripe and PayPal payment areas now update when the cart changes on the checkout page (for example from the mini-cart), including free-trial carts where the amount due today stays $0, and PayPal now reappears when a cart goes from two subscriptions to one
+* Fix - Stripe orders with two or more subscriptions now show "View subscription" and "View payment" links for each subscription in the order's Gateway dashboard box
+* Fix - Stripe: undoing a cancellation on a subscription limited to a number of payments no longer removes its end date
+* Fix - Regular coupons on subscription carts discount only the first payment, and are refused with an explanation when nothing is charged at checkout
 
 = 4.0.1 =
 * Tested - Tested up to WordPress version 7.1

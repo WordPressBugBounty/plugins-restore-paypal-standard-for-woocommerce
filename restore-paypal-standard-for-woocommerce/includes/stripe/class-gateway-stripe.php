@@ -450,7 +450,21 @@ class RPSFW_Gateway_Stripe extends WC_Payment_Gateway {
                     // "every day, 1-day free trial, 3 payments".
                     $label_parts = array();
                     if ( function_exists( 'rpsfw_format_subscription_period' ) ) {
-                        $label_parts[] = rpsfw_format_subscription_period( $sig_item['interval'], $sig_item['period'] );
+                        $schedule   = rpsfw_format_subscription_period( $sig_item['interval'], $sig_item['period'] );
+                        $discounted = isset( $sig_item['discounted_renewals'] ) ? (int) $sig_item['discounted_renewals'] : 0;
+                        // A coupon limited to a number of payments: say when
+                        // the full price starts, e.g. "every day for 2
+                        // payments, then $5.00 every day".
+                        if ( $discounted > 0 && isset( $sig_item['recurring_amount_full'] ) ) {
+                            $schedule = sprintf(
+                                /* translators: 1: billing schedule (e.g. "every month"), 2: number of discounted payments, 3: full amount */
+                                _n( '%1$s for %2$d payment, then %3$s %1$s', '%1$s for %2$d payments, then %3$s %1$s', $discounted, 'restore-paypal-standard-for-woocommerce' ),
+                                $schedule,
+                                $discounted,
+                                wp_strip_all_tags( wc_price( $sig_item['recurring_amount_full'], array( 'currency' => $currency ) ) )
+                            );
+                        }
+                        $label_parts[] = $schedule;
                     }
                     if ( ! empty( $sig_item['trial_length'] ) && function_exists( 'rpsfw_format_subscription_trial' ) ) {
                         $trial = rpsfw_format_subscription_trial( $sig_item['trial_length'], $sig_item['trial_period'] );
@@ -461,7 +475,7 @@ class RPSFW_Gateway_Stripe extends WC_Payment_Gateway {
                     if ( ! empty( $sig_item['length'] ) ) {
                         $label_parts[] = sprintf(
                             /* translators: %d: total number of payments over the life of the subscription */
-                            _n( '%d payment', '%d payments', (int) $sig_item['length'], 'restore-paypal-standard-for-woocommerce' ),
+                            _n( '%d payment in total', '%d payments in total', (int) $sig_item['length'], 'restore-paypal-standard-for-woocommerce' ),
                             (int) $sig_item['length']
                         );
                     }

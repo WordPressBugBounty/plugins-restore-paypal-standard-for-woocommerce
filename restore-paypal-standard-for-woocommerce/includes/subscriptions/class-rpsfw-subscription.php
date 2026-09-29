@@ -320,6 +320,83 @@ class RPSFW_Subscription {
 		$this->set_meta( '_rpsfw_recurring_amount', wc_format_decimal( $amount ) );
 	}
 
+	/**
+	 * Shipping included in each renewal, e.g. "$5.00 (Flat rate)".
+	 *
+	 * @return string Plain text, '' when renewals don't ship.
+	 */
+	public function get_formatted_recurring_shipping() {
+		$amount = (float) $this->get_meta( '_rpsfw_recurring_shipping', 0 );
+		if ( $amount <= 0 ) {
+			return '';
+		}
+		$formatted = wp_strip_all_tags( wc_price( $amount, array( 'currency' => $this->get_currency() ) ) );
+		$label     = (string) $this->get_meta( '_rpsfw_recurring_shipping_label', '' );
+		if ( '' === $label ) {
+			return $formatted;
+		}
+		/* translators: 1: shipping amount, 2: shipping method name e.g. "Flat rate" */
+		return sprintf( __( '%1$s (%2$s)', 'restore-paypal-standard-for-woocommerce' ), $formatted, $label );
+	}
+
+	// -----------------------------------------------------------------
+	// Recurring coupon discount.
+	// -----------------------------------------------------------------
+
+	/** @return array Recurring coupons: code => payment limit (0 = every payment). */
+	public function get_recurring_coupons() {
+		$coupons = $this->get_meta( '_rpsfw_recurring_coupons', array() );
+		return is_array( $coupons ) ? array_map( 'intval', $coupons ) : array();
+	}
+
+	/** @return int Renewals billed at the discounted amount before the full amount (0 = no change pending). */
+	public function get_discounted_renewals() {
+		return max( 0, (int) $this->get_meta( '_rpsfw_discounted_renewals', 0 ) );
+	}
+
+	/** @return float Recurring amount once a limited coupon discount runs out. */
+	public function get_recurring_amount_full() {
+		return (float) $this->get_meta( '_rpsfw_recurring_amount_full', $this->get_recurring_amount() );
+	}
+
+	/** @return float Coupon discount (incl. tax) included in the current recurring amount. */
+	public function get_recurring_discount() {
+		return max( 0.0, (float) $this->get_meta( '_rpsfw_recurring_discount', 0 ) );
+	}
+
+	/** @return bool Whether a limited coupon discount still has to run out. */
+	public function has_pending_discount_change() {
+		return $this->get_discounted_renewals() > 0 && 'yes' !== $this->get_meta( '_rpsfw_discount_ended' );
+	}
+
+	/**
+	 * Store the coupon discount a subscription was bought with.
+	 *
+	 * @param array $args {
+	 *     @type array $coupons       code => payment limit (0 = every payment).
+	 *     @type float $amount_full   Recurring amount once limited coupons run out.
+	 *     @type int   $renewals      Renewals at the current amount before $amount_full (0 = none).
+	 *     @type float $discount      Discount (incl. tax) in the current recurring amount.
+	 *     @type float $discount_full Discount (incl. tax) left once limited coupons run out.
+	 * }
+	 */
+	public function set_discount( $args ) {
+		$this->set_meta( '_rpsfw_recurring_coupons', array_map( 'intval', (array) $args['coupons'] ) );
+		$this->set_meta( '_rpsfw_recurring_amount_full', wc_format_decimal( $args['amount_full'] ) );
+		$this->set_meta( '_rpsfw_discounted_renewals', max( 0, (int) $args['renewals'] ) );
+		$this->set_meta( '_rpsfw_recurring_discount', wc_format_decimal( max( 0.0, (float) $args['discount'] ) ) );
+		$this->set_meta( '_rpsfw_recurring_discount_full', wc_format_decimal( max( 0.0, (float) $args['discount_full'] ) ) );
+	}
+
+	/**
+	 * A limited coupon discount has run out: renewals bill the full amount.
+	 */
+	public function end_discount() {
+		$this->set_recurring_amount( $this->get_recurring_amount_full() );
+		$this->set_meta( '_rpsfw_recurring_discount', wc_format_decimal( max( 0.0, (float) $this->get_meta( '_rpsfw_recurring_discount_full', 0 ) ) ) );
+		$this->set_meta( '_rpsfw_discount_ended', 'yes' );
+	}
+
 	/** @return string */
 	public function get_currency() {
 		return (string) $this->get_meta( '_rpsfw_currency', get_woocommerce_currency() );
@@ -589,16 +666,24 @@ class RPSFW_Subscription {
 	}
 
 	/**
-	 * Formatted recurring total, e.g. "$29.99 / month".
+	 * Formatted recurring total, e.g. "$29.99 every month", or while a limited
+	 * coupon discount is running "$19.99 every month for 2 payments, then
+	 * $29.99 every month".
 	 *
 	 * @return string HTML.
 	 */
 	public function get_formatted_recurring_total() {
-		return sprintf(
-			/* translators: 1: recurring amount, 2: billing schedule (e.g. "every month") */
-			_x( '%1$s %2$s', 'formatted recurring total: price then schedule', 'restore-paypal-standard-for-woocommerce' ),
-			wc_price( $this->get_recurring_amount(), array( 'currency' => $this->get_currency() ) ),
-			$this->get_formatted_schedule()
+		$remaining = $this->has_pending_discount_change()
+			? max( 0, $this->get_discounted_renewals() - count( $this->get_renewal_order_ids() ) )
+			: 0;
+
+		return rpsfw_format_recurring_amount(
+			$this->get_recurring_amount(),
+			$this->get_currency(),
+			$this->get_interval(),
+			$this->get_period(),
+			$remaining,
+			$this->get_recurring_amount_full()
 		);
 	}
 

@@ -146,10 +146,12 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 				throw new Exception( __( 'No subscription in cart.', 'restore-paypal-standard-for-woocommerce' ) );
 			}
 			// PayPal's Subscriptions API bills one plan per approval, so a
-			// cart with several subscriptions cannot be represented. The
-			// gateway hides itself for these carts; this is the backstop.
-			if ( RPSFW_Subscriptions_Cart::cart_contains_multiple_subscriptions() ) {
-				throw new Exception( __( 'PayPal supports one subscription per order. Please pay with Stripe, or purchase the subscriptions separately.', 'restore-paypal-standard-for-woocommerce' ) );
+			// cart with several subscriptions (or a limited coupon the plan
+			// can't express) cannot be represented. The gateway hides itself
+			// for these carts; this is the backstop.
+			$unsupported = self::cart_unsupported_reason();
+			if ( $unsupported ) {
+				throw new Exception( $unsupported );
 			}
 
 			// Existing-account-email guard. This endpoint fires on the PayPal
@@ -184,6 +186,14 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 			// subscriber payload is complete on the classic checkout.
 			self::update_customer_from_posted();
 
+			// The renewals must be shippable to the customer's address. Checked
+			// here, before PayPal's approval window opens, for the same reason
+			// as the email check above.
+			$shipping_error = RPSFW_Subscriptions_Cart::renewal_shipping_error();
+			if ( $shipping_error ) {
+				throw new Exception( $shipping_error );
+			}
+
 			$signature = RPSFW_Subscriptions_Cart::build_cart_signature();
 			if ( ! $signature ) {
 				throw new Exception( __( 'Could not derive subscription details from the cart.', 'restore-paypal-standard-for-woocommerce' ) );
@@ -191,7 +201,9 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 
 			$plan = self::ensure_plan( $signature );
 			if ( ! $plan ) {
-				throw new Exception( __( 'Could not create or retrieve the subscription plan.', 'restore-paypal-standard-for-woocommerce' ) );
+				// The relay may just have turned out not to build this plan.
+				$unsupported = self::cart_unsupported_reason();
+				throw new Exception( $unsupported ? $unsupported : __( 'Could not create or retrieve the subscription plan.', 'restore-paypal-standard-for-woocommerce' ) );
 			}
 
 			list( $env, $onboard ) = self::get_env_onboard( $gateway );
@@ -201,11 +213,13 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 
 			// Reuse a still-pending PayPal subscription from this session so
 			// repeated button clicks don't create duplicates — unless the
-			// plan or the subscriber (shipping address) changed.
+			// plan or the subscriber (shipping address) changed, or an
+			// earlier order already paid with it.
 			$existing_id   = WC()->session ? WC()->session->get( 'rpsfw_ppcp_pending_subscription_id' ) : '';
 			$existing_plan = WC()->session ? WC()->session->get( 'rpsfw_ppcp_pending_plan_id' ) : '';
 			$existing_hash = WC()->session ? WC()->session->get( 'rpsfw_ppcp_pending_subscriber_hash' ) : '';
-			if ( $existing_id && $existing_plan === $plan['plan_id'] && $existing_hash === $subscriber_hash ) {
+			if ( $existing_id && $existing_plan === $plan['plan_id'] && $existing_hash === $subscriber_hash
+				&& ! rpsfw_subscription_used_by_other_order( $existing_id ) ) {
 				$details = $gateway->api->get_subscription( $env, $onboard, $existing_id );
 				if ( ! empty( $details['status'] ) && in_array( $details['status'], array( 'APPROVAL_PENDING', 'APPROVED' ), true ) ) {
 					wp_send_json_success( array( 'subscription_id' => $existing_id ) );
@@ -255,7 +269,53 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 	}
 
 	/**
-	 * Find or create the PayPal Billing Plan for a cart signature.
+	 * Why PayPal can't bill the current native cart, or '' when it can.
+	 *
+	 * PayPal bills one plan per approval, so PayPal steps aside (Stripe
+	 * handles the cart) for several subscription products. A limited
+	 * recurring coupon can need a plan with two price stages (see
+	 * get_plan_terms()); that only fails while the relay is known not to
+	 * build the second stage. Used to hide the gateway and its express
+	 * buttons, and as the backstop when a subscription is created.
+	 *
+	 * @return string
+	 */
+	public static function cart_unsupported_reason() {
+		if ( ! RPSFW_Subscriptions_Cart::cart_contains_subscription() ) {
+			return '';
+		}
+		if ( RPSFW_Subscriptions_Cart::cart_contains_multiple_subscriptions() ) {
+			return __( 'PayPal supports one subscription per order. Please pay with Stripe, or purchase the subscriptions separately.', 'restore-paypal-standard-for-woocommerce' );
+		}
+
+		// Only a limited recurring coupon can make the plan inexpressible, so
+		// skip the signature entirely for every other cart. This runs inside
+		// the gateway's is_available(), hence no totals recalculation either.
+		$has_limited_coupon = false;
+		foreach ( WC()->cart->get_coupons() as $coupon ) {
+			if ( RPSFW_Subscriptions_Coupons::get_payment_limit( $coupon ) > 0 ) {
+				$has_limited_coupon = true;
+				break;
+			}
+		}
+		if ( ! $has_limited_coupon ) {
+			return '';
+		}
+
+		$signature = RPSFW_Subscriptions_Cart::build_cart_signature( false );
+		if ( $signature ) {
+			$terms = self::get_plan_terms( $signature );
+			if ( is_wp_error( $terms ) ) {
+				return $terms->get_error_message();
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Billing terms of the PayPal plan for a cart signature: up to two trial
+	 * cycles (special-price stages) ahead of the regular cycle, which is what
+	 * the plan relay builds.
 	 *
 	 * Plan mapping (same canonical mapping as the WCS integration):
 	 *  - Free trial: TRIAL cycle 1× $0 for trial_length × trial_period;
@@ -264,13 +324,124 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 	 *    initial-only coupon): one paid intro cycle at initial_total, then
 	 *    REGULAR at the recurring amount; finite lengths drop one regular
 	 *    cycle to keep the payment count exact.
+	 *  - A recurring coupon limited to a number of payments: the discounted
+	 *    renewals are a paid TRIAL cycle, then REGULAR bills the full
+	 *    amount. When today's total is the discounted amount, today's
+	 *    payment joins that cycle. Otherwise the stage before it is the free
+	 *    trial (today's total as the setup fee) or a one-payment intro cycle
+	 *    at today's total (sign-up fee, one-time items, a first-payment
+	 *    coupon) — the second trial cycle, which needs an updated relay.
 	 *  - Otherwise: plain REGULAR plan.
+	 *
+	 * @param array $signature Cart signature.
+	 * @return array|WP_Error Plan args, or an error when PayPal can't express the signature.
+	 */
+	private static function get_plan_terms( $signature ) {
+		$interval_unit  = self::period_to_paypal_unit( $signature['period'] );
+		$interval_count = max( 1, (int) $signature['interval'] );
+		$recurring      = (float) $signature['recurring_amount'];
+		$initial_total  = (float) $signature['initial_total'];
+		$renewals       = isset( $signature['discounted_renewals'] ) ? max( 0, (int) $signature['discounted_renewals'] ) : 0;
+
+		$terms = array(
+			'amount'         => number_format( $recurring, 2, '.', '' ),
+			'setup_fee'      => '0',
+			'interval_unit'  => $interval_unit,
+			'interval_count' => $interval_count,
+			'total_cycles'   => max( 0, (int) $signature['length'] ),
+			'trial_amount'   => '0',
+			'trial_unit'     => 'DAY',
+			'trial_count'    => 0,
+			'trial_cycles'   => 0,
+			'trial2_amount'  => '0',
+			'trial2_unit'    => 'DAY',
+			'trial2_count'   => 0,
+			'trial2_cycles'  => 0,
+		);
+
+		if ( $renewals > 0 ) {
+			$full            = isset( $signature['recurring_amount_full'] ) ? (float) $signature['recurring_amount_full'] : $recurring;
+			$terms['amount'] = number_format( $full, 2, '.', '' );
+
+			// Today's payment is the discounted amount (a cent or so of
+			// rounding aside): it opens the discounted trial cycle.
+			if ( $signature['trial_length'] < 1 && abs( $initial_total - $recurring ) < 0.02 ) {
+				$terms['trial_unit']   = $interval_unit;
+				$terms['trial_count']  = $interval_count;
+				$terms['trial_cycles'] = $renewals + 1;
+				// Today's total, so the first charge matches the order exactly.
+				$terms['trial_amount'] = number_format( max( 0, $initial_total ), 2, '.', '' );
+				if ( $terms['total_cycles'] > 0 ) {
+					$terms['total_cycles'] = max( 1, $terms['total_cycles'] - $terms['trial_cycles'] );
+				}
+				return $terms;
+			}
+
+			if ( ! self::supports_second_price_stage() ) {
+				return new WP_Error(
+					'rpsfw_ppcp_unsupported_discount',
+					__( 'PayPal cannot bill this coupon, which discounts a set number of payments, together with the rest of this order right now. Please pay by card, or remove the coupon.', 'restore-paypal-standard-for-woocommerce' )
+				);
+			}
+
+			if ( $signature['trial_length'] > 0 ) {
+				// Free trial; whatever is due today is the setup fee.
+				$terms['trial_unit']   = self::period_to_paypal_unit( $signature['trial_period'] );
+				$terms['trial_count']  = (int) $signature['trial_length'];
+				$terms['trial_cycles'] = 1;
+				$terms['setup_fee']    = number_format( max( 0, $initial_total ), 2, '.', '' );
+				$paid_first_cycles     = 0;
+			} else {
+				// One intro payment at today's total.
+				$terms['trial_unit']   = $interval_unit;
+				$terms['trial_count']  = $interval_count;
+				$terms['trial_cycles'] = 1;
+				$terms['trial_amount'] = number_format( max( 0, $initial_total ), 2, '.', '' );
+				$paid_first_cycles     = 1;
+			}
+
+			// Then the discounted renewals.
+			$terms['trial2_unit']   = $interval_unit;
+			$terms['trial2_count']  = $interval_count;
+			$terms['trial2_cycles'] = $renewals;
+			$terms['trial2_amount'] = number_format( max( 0, $recurring ), 2, '.', '' );
+			if ( $terms['total_cycles'] > 0 ) {
+				$terms['total_cycles'] = max( 1, $terms['total_cycles'] - $paid_first_cycles - $renewals );
+			}
+			return $terms;
+		}
+
+		if ( $signature['trial_length'] > 0 ) {
+			// Free trial: $0 trial cycle; whatever is due today (sign-up
+			// fee, one-time items, shipping) is charged as the setup fee.
+			$terms['trial_unit']   = self::period_to_paypal_unit( $signature['trial_period'] );
+			$terms['trial_count']  = (int) $signature['trial_length'];
+			$terms['trial_cycles'] = 1;
+			$terms['setup_fee']    = number_format( max( 0, $initial_total ), 2, '.', '' );
+		} elseif ( abs( $initial_total - $recurring ) >= 0.01 ) {
+			// Paid intro cycle priced at today's total.
+			$terms['trial_unit']   = $interval_unit;
+			$terms['trial_count']  = $interval_count;
+			$terms['trial_cycles'] = 1;
+			$terms['trial_amount'] = number_format( max( 0, $initial_total ), 2, '.', '' );
+			if ( $terms['total_cycles'] > 0 ) {
+				$terms['total_cycles'] = max( 1, $terms['total_cycles'] - 1 );
+			}
+		}
+
+		return $terms;
+	}
+
+	/**
+	 * Find or create the PayPal Billing Plan for a cart signature (terms from
+	 * get_plan_terms()).
 	 *
 	 * @param array $signature     Cart signature.
 	 * @param bool  $force_refresh Recreate even if cached.
+	 * @param bool  $lookup_only   Only return a plan already made; never create one.
 	 * @return array{plan_id:string,product_id:string}|false
 	 */
-	private static function ensure_plan( $signature, $force_refresh = false ) {
+	private static function ensure_plan( $signature, $force_refresh = false, $lookup_only = false ) {
 		$gateway = self::get_gateway();
 		if ( ! $gateway ) {
 			return false;
@@ -278,61 +449,58 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 		list( $env, $onboard ) = self::get_env_onboard( $gateway );
 		$seller_id             = isset( $onboard['seller_id'] ) ? $onboard['seller_id'] : '';
 
-		$interval_unit  = self::period_to_paypal_unit( $signature['period'] );
-		$interval_count = max( 1, (int) $signature['interval'] );
-		$total_cycles   = max( 0, (int) $signature['length'] );
-		$amount         = number_format( (float) $signature['recurring_amount'], 2, '.', '' );
-		$initial_total  = (float) $signature['initial_total'];
-
-		$setup_fee    = '0';
-		$trial_amount = '0';
-		$trial_unit   = 'DAY';
-		$trial_count  = 0;
-		$trial_cycles = 0;
-
-		if ( $signature['trial_length'] > 0 ) {
-			// Free trial: $0 trial cycle; whatever is due today (sign-up
-			// fee, one-time items, shipping) is charged as the setup fee.
-			$trial_unit   = self::period_to_paypal_unit( $signature['trial_period'] );
-			$trial_count  = (int) $signature['trial_length'];
-			$trial_cycles = 1;
-			$setup_fee    = number_format( max( 0, $initial_total ), 2, '.', '' );
-		} elseif ( abs( $initial_total - (float) $signature['recurring_amount'] ) >= 0.01 ) {
-			// Paid intro cycle priced at today's total.
-			$trial_unit   = $interval_unit;
-			$trial_count  = $interval_count;
-			$trial_cycles = 1;
-			$trial_amount = number_format( max( 0, $initial_total ), 2, '.', '' );
-			if ( $total_cycles > 0 ) {
-				$total_cycles = max( 1, $total_cycles - 1 );
-			}
+		$terms = self::get_plan_terms( $signature );
+		if ( is_wp_error( $terms ) ) {
+			self::log( 'ensure_plan: ' . $terms->get_error_message(), 'error' );
+			return false;
 		}
 
-		$cache_key = md5(
-			implode(
-				'|',
-				array(
-					'native',
-					$signature['currency'],
-					$amount,
-					$setup_fee,
-					$interval_unit,
-					$interval_count,
-					$total_cycles,
-					$trial_amount,
-					$trial_unit,
-					$trial_count,
-					$trial_cycles,
-					$signature['plan_name'],
-					$env,
-					$seller_id,
-				)
-			)
+		$amount         = $terms['amount'];
+		$setup_fee      = $terms['setup_fee'];
+		$interval_unit  = $terms['interval_unit'];
+		$interval_count = $terms['interval_count'];
+		$total_cycles   = $terms['total_cycles'];
+		$trial_amount   = $terms['trial_amount'];
+		$trial_unit     = $terms['trial_unit'];
+		$trial_count    = $terms['trial_count'];
+		$trial_cycles   = $terms['trial_cycles'];
+
+		$key_parts = array(
+			'native',
+			$signature['currency'],
+			$amount,
+			$setup_fee,
+			$interval_unit,
+			$interval_count,
+			$total_cycles,
+			$trial_amount,
+			$trial_unit,
+			$trial_count,
+			$trial_cycles,
+			$signature['plan_name'],
+			$env,
+			$seller_id,
 		);
+		// The second price stage only joins the key (and the request) when
+		// used, so plans cached before it existed are still found.
+		$second_stage = array();
+		if ( $terms['trial2_cycles'] > 0 ) {
+			$second_stage = array(
+				'trial2_amount' => $terms['trial2_amount'],
+				'trial2_unit'   => $terms['trial2_unit'],
+				'trial2_count'  => $terms['trial2_count'],
+				'trial2_cycles' => $terms['trial2_cycles'],
+			);
+			$key_parts    = array_merge( $key_parts, array_values( $second_stage ) );
+		}
+		$cache_key = md5( implode( '|', $key_parts ) );
 
 		$cache = get_option( self::PLAN_CACHE_OPTION, array() );
 		if ( ! $force_refresh && isset( $cache[ $cache_key ] ) ) {
 			return $cache[ $cache_key ];
+		}
+		if ( $lookup_only ) {
+			return false;
 		}
 		if ( $force_refresh && isset( $cache[ $cache_key ] ) ) {
 			unset( $cache[ $cache_key ] );
@@ -355,20 +523,23 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 		$plan = $gateway->api->create_subscription_plan(
 			$env,
 			$onboard,
-			array(
-				'product_id'     => $product['product_id'],
-				'name'           => $signature['plan_name'],
-				'description'    => $signature['plan_name'],
-				'currency_code'  => $signature['currency'],
-				'amount'         => $amount,
-				'setup_fee'      => $setup_fee,
-				'interval_unit'  => $interval_unit,
-				'interval_count' => $interval_count,
-				'total_cycles'   => $total_cycles,
-				'trial_amount'   => $trial_amount,
-				'trial_unit'     => $trial_unit,
-				'trial_count'    => $trial_count,
-				'trial_cycles'   => $trial_cycles,
+			array_merge(
+				array(
+					'product_id'     => $product['product_id'],
+					'name'           => $signature['plan_name'],
+					'description'    => $signature['plan_name'],
+					'currency_code'  => $signature['currency'],
+					'amount'         => $amount,
+					'setup_fee'      => $setup_fee,
+					'interval_unit'  => $interval_unit,
+					'interval_count' => $interval_count,
+					'total_cycles'   => $total_cycles,
+					'trial_amount'   => $trial_amount,
+					'trial_unit'     => $trial_unit,
+					'trial_count'    => $trial_count,
+					'trial_cycles'   => $trial_cycles,
+				),
+				$second_stage
 			)
 		);
 		if ( empty( $plan['plan_id'] ) ) {
@@ -383,6 +554,31 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 		update_option( self::PLAN_CACHE_OPTION, $cache, false );
 
 		return $cache[ $cache_key ];
+	}
+
+	/**
+	 * The PayPal plan the current cart needs, as made when the buyer clicked
+	 * the PayPal button (plans are saved by their exact terms). Never creates
+	 * a plan: '' when the cart has no plan yet or PayPal can't bill it.
+	 *
+	 * @return string Plan id, or ''.
+	 */
+	private static function get_cart_plan_id() {
+		$signature = RPSFW_Subscriptions_Cart::build_cart_signature();
+		if ( ! $signature ) {
+			return '';
+		}
+		$plan = self::ensure_plan( $signature, false, true );
+		return ( $plan && ! empty( $plan['plan_id'] ) ) ? (string) $plan['plan_id'] : '';
+	}
+
+	/**
+	 * Whether plans may have a second price stage (the relay builds it).
+	 *
+	 * @return bool
+	 */
+	private static function supports_second_price_stage() {
+		return ! class_exists( 'WC_PayPal_Commerce_API' ) || WC_PayPal_Commerce_API::supports_second_price_stage();
 	}
 
 	/**
@@ -550,14 +746,22 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 	 * @throws Exception When the PayPal subscription is missing or unapproved.
 	 */
 	public static function finalize_for_order( $gateway, $order, $subscription_id ) {
+		// A PayPal subscription pays for one checkout only.
+		if ( rpsfw_subscription_used_by_other_order( $subscription_id, $order->get_id() ) ) {
+			if ( WC()->session ) {
+				WC()->session->__unset( 'rpsfw_ppcp_pending_subscription_id' );
+			}
+			throw new Exception( esc_html__( 'This payment was already used for another order. Please try again.', 'restore-paypal-standard-for-woocommerce' ) );
+		}
+
 		list( $env, $onboard ) = self::get_env_onboard( $gateway );
 
-		$details = $gateway->api->get_subscription( $env, $onboard, $subscription_id );
+		$details = rpsfw_ppcp_get_checkout_subscription( $gateway, $env, $onboard, $subscription_id );
 		if ( empty( $details ) || empty( $details['status'] ) ) {
 			throw new Exception( esc_html__( 'Could not retrieve subscription status from PayPal.', 'restore-paypal-standard-for-woocommerce' ) );
 		}
 
-		if ( ! in_array( $details['status'], array( 'ACTIVE', 'APPROVED', 'APPROVAL_PENDING' ), true ) ) {
+		if ( ! in_array( $details['status'], array( 'ACTIVE', 'APPROVED' ), true ) ) {
 			throw new Exception(
 				esc_html(
 					sprintf(
@@ -567,6 +771,27 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 					)
 				)
 			);
+		}
+
+		// The subscription must bill what this order says: PayPal bills one
+		// subscription per order, on the plan made for this exact cart. A plan
+		// approved for another (cheaper) cart must not pay for this order.
+		if ( RPSFW_Subscriptions_Cart::cart_contains_multiple_subscriptions() ) {
+			throw new Exception( esc_html__( 'PayPal can pay for one subscription per order. Please pay with a card, or buy the subscriptions separately.', 'restore-paypal-standard-for-woocommerce' ) );
+		}
+		$expected_plan = self::get_cart_plan_id();
+		if ( '' === $expected_plan || empty( $details['plan_id'] ) || (string) $details['plan_id'] !== $expected_plan ) {
+			self::log(
+				sprintf(
+					'SECURITY: PayPal subscription %s is on plan %s, but order #%d needs plan %s. Not marked paid.',
+					$subscription_id,
+					isset( $details['plan_id'] ) ? $details['plan_id'] : '(none)',
+					$order->get_id(),
+					'' !== $expected_plan ? $expected_plan : '(none)'
+				),
+				'error'
+			);
+			throw new Exception( esc_html__( 'Your PayPal approval does not match this order. Please click the PayPal button and approve again.', 'restore-paypal-standard-for-woocommerce' ) );
 		}
 
 		$plan_id    = isset( $details['plan_id'] ) ? $details['plan_id'] : ( WC()->session ? WC()->session->get( 'rpsfw_ppcp_pending_plan_id' ) : '' );
@@ -801,27 +1026,29 @@ class RPSFW_Subscriptions_PayPal_Commerce {
 		$txn_id = isset( $resource['id'] ) ? $resource['id'] : '';
 		$amount = isset( $resource['amount']['total'] ) ? (float) $resource['amount']['total'] : $subscription->get_recurring_amount();
 
-		// First sale: already accounted for by the parent order at
-		// checkout. Stash the real transaction id on the parent so admin
-		// deep links target the payment rather than the subscription.
+		// First sale: the charge taken at checkout — the first billing cycle,
+		// or the setup fee (sign-up fee, one-time items) of a free trial — is
+		// already accounted for by the parent order. Stash the real
+		// transaction id on the parent so admin deep links target the payment
+		// rather than the subscription.
+		//
+		// Only when the parent order actually charged something: with nothing
+		// due at checkout (a free trial without a setup fee, or a fully
+		// discounted first payment) PayPal's first sale is the first real
+		// subscription payment and must be recorded as a renewal below, with
+		// its own order.
 		$parent = $subscription->get_parent_order();
 		if ( $parent && ! rpsfw_webhook_may_touch_order( $parent ) ) {
 			self::log( 'Refusing ' . rpsfw_current_webhook_mode() . ' mode sale for subscription #' . $subscription->get_id() . '; its order was paid in ' . rpsfw_get_order_payment_mode( $parent ) . ' mode.', 'warning' );
 			return;
 		}
 		if ( $parent
+			&& (float) $parent->get_total() > 0
 			&& $parent->get_transaction_id() === $paypal_sub_id
 			&& ! $parent->get_meta( self::META_LAST_PAYMENT_ID ) ) {
 			if ( $txn_id ) {
 				$parent->update_meta_data( self::META_LAST_PAYMENT_ID, $txn_id );
 				$parent->save();
-			}
-			// Free-trial subscriptions defer the first charge; count it
-			// now that it has actually happened.
-			if ( 0 === $subscription->get_payment_count() ) {
-				$subscription->increment_payment_count();
-				$subscription->set_last_transaction_id( $txn_id );
-				RPSFW_Subscriptions_Manager::maybe_complete( $subscription );
 			}
 			return;
 		}

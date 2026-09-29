@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Accept PayPal & Stripe with Subscriptions for WooCommerce
  * Description: Accept PayPal and Stripe payments in WooCommerce. Includes built-in subscriptions and is also compatible with the WooCommerce Subscriptions plugin.
- * Version: 4.0.1
+ * Version: 4.1.0
  * Author: Scott Paterson
  * Author URI: https://wpplugin.org
  * Plugin URI: https://wpplugin.org
@@ -11,7 +11,7 @@
  * Requires at least: 5.6
  * Requires PHP: 5.6
  * WC requires at least: 6.0
- * WC tested up to: 10
+ * WC tested up to: 11
  * 
  * Requires Plugins: woocommerce
  * 
@@ -67,7 +67,7 @@ defined( 'ABSPATH' ) || exit;
 
 // Define plugin constants
 define( 'RPSFW_PLUGIN_NAME', 'Accept PayPal & Stripe with Subscriptions for WooCommerce' );
-define( 'RPSFW_VERSION', '4.0.1' );
+define( 'RPSFW_VERSION', '4.1.0' );
 define( 'RPSFW_PLUGIN_FILE', __FILE__ );
 define( 'RPSFW_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RPSFW_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

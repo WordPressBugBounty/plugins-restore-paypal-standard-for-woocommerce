@@ -17,6 +17,12 @@ defined( 'ABSPATH' ) || exit;
 class WC_PayPal_Commerce_API {
 
     /**
+     * Set while the relay is known not to build a plan's second price stage
+     * (see create_subscription_plan()).
+     */
+    const ONE_STAGE_TRANSIENT = 'rpsfw_ppcp_relay_one_stage';
+
+    /**
      * Backend API endpoint URL
      *
      * @var string
@@ -1013,6 +1019,18 @@ class WC_PayPal_Commerce_API {
     }
 
     /**
+     * Whether plans may use a second price stage (trial2_* args). False for a
+     * while after the relay returned a plan without it — an older relay
+     * ignores those args — so carts that need it hide PayPal instead of
+     * failing at the PayPal button.
+     *
+     * @return bool
+     */
+    public static function supports_second_price_stage() {
+        return ! get_transient( self::ONE_STAGE_TRANSIENT );
+    }
+
+    /**
      * Create a Billing Plan tied to a Catalog Product.
      *
      * @param string $env        Environment.
@@ -1020,7 +1038,9 @@ class WC_PayPal_Commerce_API {
      * @param array  $args       product_id, name, description, currency_code,
      *                           amount, interval_unit, interval_count,
      *                           total_cycles, trial_amount, trial_unit,
-     *                           trial_count, trial_cycles.
+     *                           trial_count, trial_cycles, and optionally a
+     *                           second price stage: trial2_amount,
+     *                           trial2_unit, trial2_count, trial2_cycles.
      * @return array|false       array{ plan_id: string } on success.
      */
     public function create_subscription_plan( $env, $onboarding, $args ) {
@@ -1051,6 +1071,15 @@ class WC_PayPal_Commerce_API {
 
         $data = json_decode( wp_remote_retrieve_body( $response ), true );
         if ( ! empty( $data['plan_id'] ) ) {
+            // A relay that doesn't build the second price stage leaves it out
+            // of the plan without saying so, and the customer would be billed
+            // the wrong amounts. Discard that plan, and stop asking for a
+            // second stage for a while.
+            if ( ! empty( $args['trial2_cycles'] ) && ( ! isset( $data['trial_stages'] ) || (int) $data['trial_stages'] < 2 ) ) {
+                set_transient( self::ONE_STAGE_TRANSIENT, 1, 12 * HOUR_IN_SECONDS );
+                WC_Gateway_PayPal_Commerce::log( 'create_subscription_plan: the PayPal relay did not add the second price stage, so plan ' . $data['plan_id'] . ' was not used. Update the relay server.', 'error' );
+                return false;
+            }
             return array( 'plan_id' => $data['plan_id'] );
         }
         WC_Gateway_PayPal_Commerce::log( 'create_subscription_plan unexpected response: ' . wp_remote_retrieve_body( $response ), 'error' );

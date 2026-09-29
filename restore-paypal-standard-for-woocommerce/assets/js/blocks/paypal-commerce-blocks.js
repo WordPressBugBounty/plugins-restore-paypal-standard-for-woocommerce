@@ -121,6 +121,22 @@
         } catch (e) { /* ignore */ }
     }
 
+    // Reload the page with PayPal still selected. WooCommerce saves the chosen
+    // payment method a second or two after the shopper picks it, so save it
+    // first; otherwise the reload switches back to the previous method.
+    function reloadKeepingPayPal() {
+        try {
+            var checkout = window.wp && wp.data && wp.data.dispatch('wc/store/checkout');
+            if (checkout && typeof checkout.updateDraftOrder === 'function') {
+                checkout.updateDraftOrder({ payment_method: 'rpsfw_paypal_commerce' })
+                    .catch(function() { /* reload anyway */ })
+                    .then(function() { window.location.reload(); });
+                return;
+            }
+        } catch (e) { /* older WooCommerce; reload anyway */ }
+        window.location.reload();
+    }
+
     const Label = (props) => {
         const { PaymentMethodLabel } = props.components;
         
@@ -164,7 +180,6 @@
         const [renderKey, setRenderKey] = useState(0);
         const buttonsRendered = useRef(false);
         const containerRef = useRef(null);
-        const didMountRef = useRef(false);
         // Latest billing/shipping data, refreshed on every render, so the
         // PayPal button's onClick validates what the shopper has entered NOW
         // (the buttons are rendered once and would otherwise close over stale
@@ -218,10 +233,18 @@
             });
         };
 
-        // Cart total (minor units). We watch this so cart edits made on the
-        // checkout page (e.g. removing an item via the mini/side cart) trigger
-        // a re-check and re-render, matching the Stripe block behaviour.
+        // What the shopper is buying: the cart total (minor units), each item
+        // and its quantity, and the coupons. We watch this so cart edits made
+        // on the checkout page (e.g. removing an item via the mini/side cart)
+        // trigger a re-check, matching the Stripe block behaviour. The total
+        // alone misses a free-trial cart, where it stays $0.
         const cartTotalValue = ( billing && billing.cartTotal ) ? billing.cartTotal.value : null;
+        const cartItems = ( props.cartData && props.cartData.cartItems ) ? props.cartData.cartItems : [];
+        const appliedCoupons = ( billing && billing.appliedCoupons ) ? billing.appliedCoupons : [];
+        const cartKey = [ cartTotalValue ]
+            .concat( cartItems.map( (item) => item.key + 'x' + item.quantity ) )
+            .concat( appliedCoupons.map( (coupon) => coupon.code ) )
+            .join( '|' );
 
         // Payment setup handler
         useEffect(() => {
@@ -293,17 +316,15 @@
             return () => clearInterval(interval);
         }, [status]);
 
-        // Re-check subscription status and rebuild the buttons when the cart
-        // changes on the checkout page (e.g. removing an item via the mini/side
-        // cart). The static isSubscription flag and the loaded PayPal SDK mode
-        // are fixed at page load; if the cart flips between subscription and
-        // one-off we reload so the SDK re-initializes with the correct intent.
-        // Skips the initial mount (the render effect below handles first load).
+        // Re-check subscription status when PayPal is shown and whenever the
+        // cart changes on the checkout page (e.g. removing an item via the
+        // mini/side cart). The static isSubscription flag and the loaded PayPal
+        // SDK mode are fixed at page load; if the cart flipped between
+        // subscription and one-off we reload so the SDK re-initializes with the
+        // correct intent. This also runs when PayPal is first shown, because
+        // the cart may have changed while another payment method was selected
+        // (PayPal's buttons aren't on the page then, so they missed it).
         useEffect(() => {
-            if (!didMountRef.current) {
-                didMountRef.current = true;
-                return;
-            }
             if (status === 'approved') {
                 return;
             }
@@ -325,13 +346,13 @@
             .then((r) => r.json())
             .then((data) => {
                 if (data && data.success && ( !!data.data.is_subscription !== isSubscription )) {
-                    window.location.reload();
+                    reloadKeepingPayPal();
                 }
             })
             .catch(() => {
                 // No-op: leave the existing buttons in place.
             });
-        }, [cartTotalValue]);
+        }, [cartKey]);
 
         // Render PayPal buttons when SDK is ready
         useEffect(() => {
@@ -408,7 +429,11 @@
                         if (data.success && data.data.subscription_id) {
                             return data.data.subscription_id;
                         }
-                        throw new Error(data.data?.message || 'Failed to create subscription');
+                        // Show the server's reason (e.g. no renewal shipping to
+                        // this address); PayPal's onError shows nothing.
+                        const msg = (data && data.data && data.data.message) || 'Failed to create subscription';
+                        showCheckoutNotice(msg);
+                        throw new Error(msg);
                     });
                 };
 
@@ -450,7 +475,9 @@
                         if (data.success && data.data.order_id) {
                             return data.data.order_id;
                         }
-                        throw new Error(data.data?.message || 'Failed to create order');
+                        const msg = (data && data.data && data.data.message) || 'Failed to create order';
+                        showCheckoutNotice(msg);
+                        throw new Error(msg);
                     });
                 };
 

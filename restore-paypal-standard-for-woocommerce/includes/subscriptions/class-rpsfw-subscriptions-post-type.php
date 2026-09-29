@@ -38,10 +38,19 @@ class RPSFW_Subscriptions_Post_Type {
 		add_filter( 'manage_edit-' . self::POST_TYPE . '_sortable_columns', array( __CLASS__, 'sortable_columns' ) );
 		add_action( 'pre_get_posts', array( __CLASS__, 'handle_sorting' ) );
 		add_action( 'admin_head', array( __CLASS__, 'list_table_styles' ) );
+	}
 
-		// Keep subscription notes (stored as comments) out of front-end
-		// comment queries, feeds and counts — same approach WooCommerce
-		// uses for order notes.
+	/**
+	 * Keep subscription notes (stored as comments) out of comment queries,
+	 * feeds and counts — same approach WooCommerce uses for order notes.
+	 *
+	 * Registered on every request, NOT only while the module is on: the notes
+	 * stay in the database when the module is switched off or WooCommerce
+	 * Subscriptions takes over, and without this they would surface on the
+	 * Comments screen against a post type that is no longer registered
+	 * (WordPress then raises a map_meta_cap notice for every row).
+	 */
+	public static function init_note_filters() {
 		add_filter( 'comments_clauses', array( __CLASS__, 'exclude_note_comments' ), 10, 1 );
 		add_filter( 'comment_feed_where', array( __CLASS__, 'exclude_note_comments_from_feed' ) );
 	}

@@ -38,19 +38,27 @@ final class WC_Gateway_PayPal_Commerce_Blocks_Support extends AbstractPaymentMet
     /**
      * Returns if this payment method should be active. If false, the scripts will not be enqueued.
      *
+     * Only the settings decide this (enabled and connected), not the cart.
+     * Whether PayPal suits the current cart (e.g. it is hidden for two or more
+     * subscriptions) is is_available()'s job: WooCommerce sends the available
+     * payment methods with every cart update, so PayPal appears or disappears
+     * as the shopper edits the cart on the checkout page. Checking the cart
+     * here too meant a page that loaded with two subscriptions never loaded
+     * PayPal's script, so PayPal couldn't come back after one was removed.
+     *
      * @return boolean
      */
     public function is_active() {
         if ( ! $this->gateway ) {
             return false;
         }
-        
+
         // Check if the gateway itself is enabled in settings
         if ( 'yes' !== $this->gateway->enabled ) {
             return false;
         }
-        
-        return $this->gateway->is_available();
+
+        return $this->gateway->is_connected();
     }
 
     /**

@@ -36,6 +36,8 @@ class RPSFW_Stripe_Subscriptions {
 	const META_SCHEDULE_ID     = '_rpsfw_stripe_schedule_id';
 	const META_SUB_ITEM_ID     = '_rpsfw_stripe_subscription_item_id';
 	const META_PAUSED_PRICE    = '_rpsfw_stripe_paused_price_id';
+	// Order: a limited coupon's price plan waiting for the first payment.
+	const META_PENDING_SCHEDULE = '_rpsfw_stripe_pending_schedule';
 
 	/**
 	 * The gateway instance.
@@ -116,6 +118,9 @@ class RPSFW_Stripe_Subscriptions {
 
 		// Subscription lifecycle hooks: propagate WC actions to Stripe.
 		add_action( 'woocommerce_subscription_status_cancelled', array( $this, 'cancel_stripe_subscription' ) );
+		// When "Stop renewing after" ends the subscription in WooCommerce, stop
+		// Stripe too: Stripe doesn't know the subscription's length.
+		add_action( 'woocommerce_subscription_status_expired', array( $this, 'cancel_stripe_subscription' ) );
 		// "pending-cancel" = customer cancelled but keeps access until the paid
 		// period ends. Map to Stripe's cancel_at_period_end so it stops billing
 		// at period end instead of charging another cycle. (Stripe owns the
@@ -983,8 +988,10 @@ class RPSFW_Stripe_Subscriptions {
 						: '';
 					$existing_cus = is_object( $existing->customer ) ? $existing->customer->id : (string) $existing->customer;
 
-					// Same cart, still awaiting authentication: reuse it.
-					if ( in_array( $existing->status, array( 'incomplete', 'trialing' ), true ) && '' !== $existing_sig && $existing_sig === $signature_hash ) {
+					// Same cart, still awaiting authentication: reuse it — never
+					// one an earlier order already paid with.
+					if ( in_array( $existing->status, array( 'incomplete', 'trialing' ), true ) && '' !== $existing_sig && $existing_sig === $signature_hash
+						&& ! rpsfw_subscription_used_by_other_order( $existing->id ) ) {
 						RPSFW_Gateway_Stripe::log( 'Stripe subscriptions: reusing draft subscription ' . $candidate_sub . ' (cart unchanged).' );
 						if ( WC()->session ) {
 							WC()->session->set( 'rpsfw_stripe_pending_subscription_id', $existing->id );
@@ -1346,11 +1353,26 @@ class RPSFW_Stripe_Subscriptions {
 				throw new Exception( __( 'Stripe subscription was not created. Please try again.', 'restore-paypal-standard-for-woocommerce' ) );
 			}
 
+			// A Stripe subscription pays for one checkout only.
+			if ( rpsfw_subscription_used_by_other_order( $subscription_id, $order->get_id() ) ) {
+				if ( WC()->session ) {
+					WC()->session->__unset( 'rpsfw_stripe_pending_subscription_id' );
+				}
+				throw new Exception( __( 'This payment was already used for another order. Please try again.', 'restore-paypal-standard-for-woocommerce' ) );
+			}
+
 			$sub = RPSFW_Stripe_API::retrieve_subscription( $subscription_id, array(
 				'expand' => array( 'latest_invoice.confirmation_secret', 'pending_setup_intent', 'default_payment_method' ),
 			) );
 			if ( is_wp_error( $sub ) ) {
 				throw new Exception( $sub->get_error_message() );
+			}
+			// Exactly the subscription asked about, and not one the checkout
+			// for several subscriptions made (that checkout pays its own at
+			// once, and they aren't saved on the order to show they're used).
+			if ( empty( $sub->id ) || (string) $sub->id !== (string) $subscription_id
+				|| ! empty( $sub->metadata->rpsfw_independent_subscriptions ) ) {
+				throw new Exception( __( 'This payment does not match your order. Please try again.', 'restore-paypal-standard-for-woocommerce' ) );
 			}
 
 			$status = isset( $sub->status ) ? $sub->status : '';
@@ -1376,9 +1398,24 @@ class RPSFW_Stripe_Subscriptions {
 			// and therefore arrive here already 'trialing'/'active', so they
 			// skip this branch and complete immediately below — unchanged.
 			if ( 'incomplete' === $status ) {
+				// Only link a subscription made for this checkout (its first
+				// invoice bills this order's total): once linked, Stripe's
+				// webhook completes the order when it is paid.
+				if ( ! RPSFW_Stripe_API::first_invoice_matches_order( $sub, $order ) ) {
+					throw new Exception( __( 'The payment amount did not match your order. Please refresh the page and try again.', 'restore-paypal-standard-for-woocommerce' ) );
+				}
 				$order->update_meta_data( self::META_SUBSCRIPTION_ID, $sub->id );
 				if ( ! empty( $sub->customer ) ) {
 					$order->update_meta_data( self::META_CUSTOMER_ID, is_object( $sub->customer ) ? $sub->customer->id : (string) $sub->customer );
+				}
+				// Keep a limited coupon's price plan with the order, for the
+				// webhook to set up if the browser never comes back to finish.
+				$pending_schedule = WC()->session ? WC()->session->get( 'rpsfw_stripe_pending_schedule' ) : null;
+				if ( ! empty( $pending_schedule ) && is_array( $pending_schedule ) ) {
+					$pending_schedule['subscription_id'] = $sub->id;
+					$order->update_meta_data( self::META_PENDING_SCHEDULE, $pending_schedule );
+				} else {
+					$order->delete_meta_data( self::META_PENDING_SCHEDULE );
 				}
 				$order->set_transaction_id( $sub->id );
 				$order->update_status( 'pending', __( 'Awaiting Stripe payment confirmation.', 'restore-paypal-standard-for-woocommerce' ) );
@@ -1399,6 +1436,17 @@ class RPSFW_Stripe_Subscriptions {
 					'redirect'               => $this->gateway->get_return_url( $order ),
 				);
 			}
+
+			// Paid (or trialing): only if the subscription was made for this
+			// checkout.
+			if ( ! RPSFW_Stripe_API::first_invoice_matches_order( $sub, $order ) ) {
+				throw new Exception( __( 'The payment amount did not match your order. Please contact us.', 'restore-paypal-standard-for-woocommerce' ) );
+			}
+
+			// A free trial's subscription is made when the checkout page loads
+			// and is only rebuilt when today's total changes, which a coupon
+			// entered afterwards doesn't do on a $0 trial.
+			$this->maybe_reprice_trial_for_cart( $sub );
 
 			// Capture details on the parent order + WC subscription.
 			// Prefer the subscription's default_payment_method; fall back to
@@ -1527,16 +1575,26 @@ class RPSFW_Stripe_Subscriptions {
 			}
 
 			// If a limited-duration recurring coupon was applied, wrap the now
-			// active/paid subscription in a Stripe Subscription Schedule that
-			// steps the price back up to full after the covered cycles. This is
-			// fully Stripe-managed for every interval (day/week/month/year) — no
-			// coupons and no webhook removal required.
-			if ( WC()->session ) {
+			// active/paid (or trialing) subscription in a Stripe Subscription
+			// Schedule that steps the price back up to full after the covered
+			// cycles, counted from the end of any free trial. This is fully
+			// Stripe-managed for every interval (day/week/month/year) — no
+			// coupons and no webhook removal required. The plan saved with the
+			// order for this subscription (when payment waited for the browser)
+			// comes first; otherwise the session's.
+			$sched_data = self::get_pending_schedule( $order, $sub->id );
+			if ( ! $sched_data && WC()->session ) {
 				$sched_data = WC()->session->get( 'rpsfw_stripe_pending_schedule' );
-				if ( ! empty( $sched_data ) && is_array( $sched_data ) ) {
-					$this->apply_limited_coupon_schedule( $sub->id, $sched_data, $order );
+			}
+			if ( ! empty( $sched_data ) && is_array( $sched_data ) ) {
+				$this->apply_limited_coupon_schedule( $sub->id, $sched_data, $order );
+				if ( WC()->session ) {
 					WC()->session->__unset( 'rpsfw_stripe_pending_schedule' );
 				}
+			}
+			if ( $order->get_meta( self::META_PENDING_SCHEDULE ) ) {
+				$order->delete_meta_data( self::META_PENDING_SCHEDULE );
+				$order->save();
 			}
 
 			if ( WC()->session ) {
@@ -1559,18 +1617,122 @@ class RPSFW_Stripe_Subscriptions {
 	}
 
 	/**
+	 * Re-price a free trial's subscription that was made before the cart was
+	 * final — e.g. a coupon entered on the checkout page after the payment
+	 * form loaded — so Stripe bills what the customer bought, and leave the
+	 * final cart's limited coupon schedule for the step that applies it.
+	 *
+	 * Only a single-schedule subscription that has charged nothing yet is
+	 * touched; one made for this very cart is left alone.
+	 *
+	 * @param \Stripe\Subscription $sub Subscription, latest_invoice expanded.
+	 * @return void
+	 */
+	private function maybe_reprice_trial_for_cart( $sub ) {
+		if ( 'trialing' !== $sub->status || ! empty( $sub->latest_invoice->total ) || 1 !== count( $sub->items->data ) ) {
+			return;
+		}
+		if ( ! WC()->cart || WC()->cart->is_empty() || ( is_array( WC()->cart->recurring_carts ) && count( WC()->cart->recurring_carts ) > 1 ) ) {
+			return;
+		}
+
+		$signature = $this->build_signature_from_cart();
+		if ( ! $signature ) {
+			return;
+		}
+		$signature_hash = md5( (string) wp_json_encode( $signature ) );
+		if ( isset( $sub->metadata->rpsfw_cart_signature ) && $signature_hash === (string) $sub->metadata->rpsfw_cart_signature ) {
+			return;
+		}
+
+		$price_id = RPSFW_Stripe_API::find_or_create_price( array(
+			'amount'         => $signature['recurring_amount'],
+			'currency'       => $signature['currency'],
+			'interval'       => $signature['interval'],
+			'interval_count' => $signature['interval_count'],
+			'product_name'   => $signature['plan_name'],
+		) );
+		if ( is_wp_error( $price_id ) ) {
+			RPSFW_Gateway_Stripe::log( 'Could not re-price trial subscription ' . $sub->id . ': ' . $price_id->get_error_message(), 'error' );
+			return;
+		}
+
+		$updated = RPSFW_Stripe_API::update_subscription( $sub->id, array(
+			'items'              => array(
+				array(
+					'id'    => $sub->items->data[0]->id,
+					'price' => $price_id,
+				),
+			),
+			'proration_behavior' => 'none',
+			'metadata'           => array( 'rpsfw_cart_signature' => $signature_hash ),
+		) );
+		if ( is_wp_error( $updated ) ) {
+			RPSFW_Gateway_Stripe::log( 'Could not re-price trial subscription ' . $sub->id . ': ' . $updated->get_error_message(), 'error' );
+			return;
+		}
+
+		if ( WC()->session ) {
+			if ( ! empty( $signature['limited_coupons'] ) ) {
+				WC()->session->set( 'rpsfw_stripe_pending_schedule', array(
+					'recurring_amount'      => $signature['recurring_amount'],
+					'recurring_amount_full' => $signature['recurring_amount_full'],
+					'limited_coupons'       => $signature['limited_coupons'],
+					'interval'              => $signature['interval'],
+					'interval_count'        => $signature['interval_count'],
+					'currency'              => $signature['currency'],
+					'plan_name'             => $signature['plan_name'],
+					'discounted_price_id'   => $price_id,
+				) );
+			} else {
+				WC()->session->__unset( 'rpsfw_stripe_pending_schedule' );
+			}
+		}
+
+		RPSFW_Gateway_Stripe::log( 'Re-priced trial subscription ' . $sub->id . ' to the final cart (' . $signature['recurring_amount'] . ').' );
+	}
+
+	/**
+	 * The limited coupon price plan saved with an order for its Stripe
+	 * subscription while the first payment waited for the browser (the
+	 * deferred branch of maybe_override_process_payment()).
+	 *
+	 * @param WC_Order $order         Order.
+	 * @param string   $stripe_sub_id Stripe subscription the plan must be for.
+	 * @return array|null Schedule data, or null when none is saved for it.
+	 */
+	private static function get_pending_schedule( $order, $stripe_sub_id ) {
+		$data = $order ? $order->get_meta( self::META_PENDING_SCHEDULE ) : null;
+		if ( ! is_array( $data ) || empty( $data['subscription_id'] ) || (string) $data['subscription_id'] !== (string) $stripe_sub_id ) {
+			return null;
+		}
+		return $data;
+	}
+
+	/**
 	 * Wrap a paid subscription in a Stripe Subscription Schedule that steps the
 	 * price up to full after each limited-duration recurring coupon's covered
 	 * number of cycles. Fully Stripe-managed for all intervals (day/week/month/
 	 * year) — Stripe advances the phases on its own servers, so no webhook or
 	 * WP-cron is involved.
 	 *
-	 * Phase 0 is the current (discounted) price the subscription was created
-	 * with. Each subsequent phase adds back the discounts of the coupons that
-	 * have reached their payment limit, until the final open-ended phase bills
-	 * the full price. Phase lengths use `duration` = { interval, interval_count }
-	 * expressed in the subscription's own interval, so cycle counts are exact
-	 * for every interval.
+	 * The first discounted phase is the current (discounted) price the
+	 * subscription was created with. Each subsequent phase adds back the
+	 * discounts of the coupons that have reached their payment limit, until the
+	 * final open-ended phase bills the full price. Phase lengths use `duration`
+	 * = { interval, interval_count } expressed in the subscription's own
+	 * interval, so cycle counts are exact for every interval.
+	 *
+	 * A coupon's limit counts payments that were actually discounted
+	 * (WooCommerce Subscriptions skips the $0 order of a free trial), so:
+	 *  - Without a trial, the current phase is the first discounted phase: the
+	 *    payment taken at checkout is the first of the limit.
+	 *  - With a free trial, the trial becomes a phase of its own and the
+	 *    discounted phases start when it ends, so every discounted payment
+	 *    falls after the trial however long it is. The trial phase re-sends the
+	 *    current phase's trial_end: Stripe unsets any phase setting an update
+	 *    leaves out, and updating the current phase without it would end the
+	 *    trial on the spot and invoice the customer.
 	 *
 	 * @param string              $subscription_id Stripe subscription id.
 	 * @param array               $data            Session-stashed schedule data.
@@ -1674,10 +1836,27 @@ class RPSFW_Stripe_Subscriptions {
 			return;
 		}
 
-		// Preserve the current phase start date so Stripe treats phase 0 as the
-		// ongoing period rather than restarting it.
-		if ( isset( $schedule->phases[0]->start_date ) ) {
-			$phases[0]['start_date'] = $schedule->phases[0]->start_date;
+		// The schedule's single phase mirrors the subscription's current
+		// period — for a trialing subscription, the trial.
+		$current   = isset( $schedule->phases[0] ) ? $schedule->phases[0] : null;
+		$trial_end = ( $current && ! empty( $current->trial_end ) ) ? (int) $current->trial_end : 0;
+
+		if ( $trial_end ) {
+			// Keep the trial as it is, as a phase of its own ending when the
+			// trial does; the discounted phases follow from there.
+			array_unshift(
+				$phases,
+				array(
+					'items'      => self::get_schedule_phase_items( $current, $discounted_price_id ),
+					'start_date' => $current->start_date,
+					'end_date'   => $trial_end,
+					'trial_end'  => $trial_end,
+				)
+			);
+		} elseif ( $current && isset( $current->start_date ) ) {
+			// Preserve the current phase start date so Stripe treats the first
+			// discounted phase as the ongoing period rather than restarting it.
+			$phases[0]['start_date'] = $current->start_date;
 		}
 
 		$result = RPSFW_Stripe_API::update_subscription_schedule( $schedule->id, $phases, 'release' );
@@ -1704,11 +1883,45 @@ class RPSFW_Stripe_Subscriptions {
 			}
 		}
 		RPSFW_Gateway_Stripe::log( sprintf(
-			'Applied limited-coupon price schedule %s to subscription %s (%d phase(s)).',
+			'Applied limited-coupon price schedule %s to subscription %s (%d phase(s)%s).',
 			$schedule->id,
 			$subscription_id,
-			count( $phases )
+			count( $phases ),
+			$trial_end ? ', free trial kept until ' . gmdate( 'Y-m-d H:i:s', $trial_end ) . ' UTC' : ''
 		) );
+	}
+
+	/**
+	 * The items of a schedule phase in the shape phase updates take, so the
+	 * current phase can be re-sent unchanged. Falls back to one unit of
+	 * $fallback_price_id (the price the subscription was created with).
+	 *
+	 * @param object|null $phase             Subscription schedule phase.
+	 * @param string      $fallback_price_id Price id to use when the phase has no readable items.
+	 * @return array[]
+	 */
+	private static function get_schedule_phase_items( $phase, $fallback_price_id ) {
+		$items = array();
+		if ( $phase && ! empty( $phase->items ) ) {
+			foreach ( $phase->items as $item ) {
+				$price = isset( $item->price ) ? $item->price : '';
+				$price = is_object( $price ) ? $price->id : (string) $price;
+				if ( '' === $price ) {
+					continue;
+				}
+				$items[] = array(
+					'price'    => $price,
+					'quantity' => isset( $item->quantity ) ? max( 1, (int) $item->quantity ) : 1,
+				);
+			}
+		}
+		if ( empty( $items ) && $fallback_price_id ) {
+			$items[] = array(
+				'price'    => $fallback_price_id,
+				'quantity' => 1,
+			);
+		}
+		return $items;
 	}
 
 	/**
@@ -1864,7 +2077,10 @@ class RPSFW_Stripe_Subscriptions {
 		// Canceling the schedule also cancels its subscription immediately.
 		$schedule_id = $subscription->get_meta( self::META_SCHEDULE_ID );
 		if ( $schedule_id ) {
-			$result = RPSFW_Stripe_API::cancel_schedule( $schedule_id );
+			// No credit for unused time and no final bill, the same as
+			// cancelling a subscription without a schedule (Stripe's default
+			// for a schedule would credit the customer).
+			$result = RPSFW_Stripe_API::cancel_schedule( $schedule_id, array( 'invoice_now' => false, 'prorate' => false ) );
 			if ( ! is_wp_error( $result ) ) {
 				return;
 			}
@@ -2067,14 +2283,11 @@ class RPSFW_Stripe_Subscriptions {
 			// pending-cancel, ...). Without 'any', wc_get_orders defaults to the
 			// shop_order statuses and returns nothing for subscriptions.
 			'status'     => 'any',
-			// Use a proper meta_query — the meta_key/meta_value shorthand is not
-			// reliably honored for the shop_subscription order type / HPOS.
-			'meta_query' => array(
-				array(
-					'key'   => self::META_SUBSCRIPTION_ID,
-					'value' => $stripe_subscription_id,
-				),
-			),
+			// meta_key/meta_value, not meta_query: WooCommerce's classic (posts)
+			// order storage ignores meta_query and would return any subscription.
+			// Both storages honor meta_key/meta_value.
+			'meta_key'   => self::META_SUBSCRIPTION_ID, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			'meta_value' => $stripe_subscription_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 		);
 		$results = wc_get_orders( $args );
 		if ( empty( $results ) ) {
@@ -2113,12 +2326,9 @@ class RPSFW_Stripe_Subscriptions {
 			'limit'      => 1,
 			'type'       => 'shop_order',
 			'status'     => 'any',
-			'meta_query' => array(
-				array(
-					'key'   => self::META_SUBSCRIPTION_ID,
-					'value' => $stripe_subscription_id,
-				),
-			),
+			// Not meta_query: classic order storage ignores it (see above).
+			'meta_key'   => self::META_SUBSCRIPTION_ID, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			'meta_value' => $stripe_subscription_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 		) );
 
 		if ( empty( $orders ) ) {
@@ -2160,12 +2370,9 @@ class RPSFW_Stripe_Subscriptions {
 			'limit'      => -1,
 			'type'       => 'shop_subscription',
 			'status'     => 'any',
-			'meta_query' => array(
-				array(
-					'key'   => self::META_SUBSCRIPTION_ID,
-					'value' => $stripe_subscription_id,
-				),
-			),
+			// Not meta_query: classic order storage ignores it (see above).
+			'meta_key'   => self::META_SUBSCRIPTION_ID, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+			'meta_value' => $stripe_subscription_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 		) );
 		if ( empty( $results ) ) {
 			// Same parent-order fallback as the singular lookup.
@@ -2298,6 +2505,12 @@ class RPSFW_Stripe_Subscriptions {
 			RPSFW_Gateway_Stripe::log( 'Renewal webhook: skipping initial (subscription_create) invoice ' . $invoice_id . ' for ' . $stripe_subscription_id . '.' );
 			return;
 		}
+		// Only a new billing period is a renewal: a price change makes Stripe
+		// issue a subscription_update invoice, which is not one.
+		if ( '' !== $billing_reason && 'subscription_cycle' !== $billing_reason ) {
+			RPSFW_Gateway_Stripe::log( 'Renewal webhook: skipping ' . $billing_reason . ' invoice ' . $invoice_id . ' for ' . $stripe_subscription_id . ' (not a renewal).' );
+			return;
+		}
 
 		// A single Stripe subscription may back multiple WC subscriptions
 		// (mixed-interval carts). Resolve them all, then figure out which this
@@ -2381,7 +2594,9 @@ class RPSFW_Stripe_Subscriptions {
 				$parent_order ? rpsfw_get_order_payment_mode( $parent_order ) : rpsfw_current_webhook_mode(),
 				false
 			);
+			$was_active = $wc_sub->has_status( 'active' );
 			$renewal_order->payment_complete( $invoice_id );
+			rpsfw_wcs_record_renewal_payment( $wc_sub, $renewal_order, $was_active );
 
 			// Record the renewal charge + PaymentIntent on the renewal order so
 			// a later Stripe-side refund of this renewal resolves directly (the
@@ -2526,8 +2741,10 @@ class RPSFW_Stripe_Subscriptions {
 			RPSFW_Gateway_Stripe::log( 'webhook_subscription_deleted: no matching WC subscription for ' . $id . ' — nothing to cancel.', 'warning' );
 			return;
 		}
-		if ( $wc_sub->has_status( 'cancelled' ) ) {
-			RPSFW_Gateway_Stripe::log( 'webhook_subscription_deleted: WC subscription #' . $wc_sub->get_id() . ' is already cancelled.' );
+		// An expired subscription can't become cancelled (WooCommerce
+		// Subscriptions refuses); it is already over.
+		if ( $wc_sub->has_status( array( 'cancelled', 'expired' ) ) ) {
+			RPSFW_Gateway_Stripe::log( 'webhook_subscription_deleted: WC subscription #' . $wc_sub->get_id() . ' has already ended.' );
 			return;
 		}
 		// Suppress our own cancel-back-to-Stripe hook to avoid loops.
@@ -2578,7 +2795,7 @@ class RPSFW_Stripe_Subscriptions {
 
 		switch ( $status ) {
 			case 'canceled':
-				if ( ! $wc_sub->has_status( 'cancelled' ) ) {
+				if ( ! $wc_sub->has_status( array( 'cancelled', 'expired' ) ) ) {
 					remove_action( 'woocommerce_subscription_status_cancelled', array( $this, 'cancel_stripe_subscription' ) );
 					$wc_sub->update_status( 'cancelled', __( 'Stripe reported subscription canceled.', 'restore-paypal-standard-for-woocommerce' ) );
 					add_action( 'woocommerce_subscription_status_cancelled', array( $this, 'cancel_stripe_subscription' ) );
@@ -2647,6 +2864,39 @@ class RPSFW_Stripe_Subscriptions {
 			return;
 		}
 
+		// The checkout's checks again: the subscription paid for no other
+		// order, and its first invoice billed this order's total (skipped for
+		// the checkout for several subscriptions, where each bills part of it).
+		// Otherwise the order stays unpaid for the merchant.
+		if ( rpsfw_subscription_used_by_other_order( $stripe_sub_id, $parent->get_id() ) ) {
+			RPSFW_Gateway_Stripe::log( 'SECURITY: ' . $stripe_sub_id . ' already paid for another order. Order #' . $parent->get_id() . ' not marked paid.', 'error' );
+			rpsfw_note_unmatched_payment(
+				$parent,
+				sprintf(
+					/* translators: %s: Stripe subscription id */
+					__( 'Not marked paid: Stripe subscription %s already paid for another order.', 'restore-paypal-standard-for-woocommerce' ),
+					$stripe_sub_id
+				)
+			);
+			return;
+		}
+		$stripe_sub = RPSFW_Stripe_API::retrieve_subscription( $stripe_sub_id, array( 'expand' => array( 'latest_invoice' ) ) );
+		if ( is_wp_error( $stripe_sub ) ) {
+			return; // Can't check it: leave the order unpaid.
+		}
+		if ( empty( $stripe_sub->metadata->rpsfw_independent_subscriptions )
+			&& ! RPSFW_Stripe_API::first_invoice_matches_order( $stripe_sub, $parent ) ) {
+			rpsfw_note_unmatched_payment(
+				$parent,
+				sprintf(
+					/* translators: %s: Stripe subscription id */
+					__( 'Not marked paid: the first payment of Stripe subscription %s does not match this order\'s total. Check the payment in Stripe before completing this order.', 'restore-paypal-standard-for-woocommerce' ),
+					$stripe_sub_id
+				)
+			);
+			return;
+		}
+
 		// Resolve the initial invoice id from the webhook payload so Stripe-side
 		// refunds/disputes can resolve back to this order.
 		$invoice_id = '';
@@ -2698,6 +2948,15 @@ class RPSFW_Stripe_Subscriptions {
 			$stripe_sub_id
 		) );
 		RPSFW_Gateway_Stripe::log( 'Stripe subscriptions: completed order #' . $parent->get_id() . ' from webhook (subscription ' . $stripe_sub_id . ' paid/active).' );
+
+		// The browser never came back to finish, so set up the limited
+		// coupon's price plan that was saved with the order.
+		$sched_data = self::get_pending_schedule( $parent, $stripe_sub_id );
+		if ( $sched_data ) {
+			$parent->delete_meta_data( self::META_PENDING_SCHEDULE );
+			$parent->save();
+			$this->apply_limited_coupon_schedule( $stripe_sub_id, $sched_data, $parent );
+		}
 	}
 
 	/**

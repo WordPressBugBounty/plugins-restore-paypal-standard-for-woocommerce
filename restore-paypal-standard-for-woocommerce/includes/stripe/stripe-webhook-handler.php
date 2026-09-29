@@ -495,16 +495,13 @@ function rpsfw_stripe_find_order_via_subscription_meta( $payment_intent_id, $cha
     }
 
     foreach ( $lookups as $lookup ) {
+        // meta_key/meta_value, not meta_query: see rpsfw_stripe_find_order_by_meta().
         $subs = wc_get_orders( array(
             'limit'      => 1,
             'type'       => 'shop_subscription',
             'status'     => 'any',
-            'meta_query' => array(
-                array(
-                    'key'   => $lookup[0],
-                    'value' => $lookup[1],
-                ),
-            ),
+            'meta_key'   => $lookup[0], // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+            'meta_value' => $lookup[1], // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
         ) );
         if ( ! empty( $subs ) ) {
             $parent = $subs[0]->get_parent();
@@ -556,16 +553,13 @@ function rpsfw_stripe_find_order_via_invoice_subscription( $invoice_id ) {
 
     // The WC subscription carries the Stripe subscription id; its parent is the
     // checkout order that captured the initial payment.
+    // meta_key/meta_value, not meta_query: see rpsfw_stripe_find_order_by_meta().
     $subs = wc_get_orders( array(
         'limit'      => 1,
         'type'       => 'shop_subscription',
         'status'     => 'any',
-        'meta_query' => array(
-            array(
-                'key'   => '_rpsfw_stripe_subscription_id',
-                'value' => $subscription_id,
-            ),
-        ),
+        'meta_key'   => '_rpsfw_stripe_subscription_id', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+        'meta_value' => $subscription_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
     ) );
     if ( ! empty( $subs ) ) {
         $parent = $subs[0]->get_parent();
@@ -580,12 +574,8 @@ function rpsfw_stripe_find_order_via_invoice_subscription( $invoice_id ) {
         'limit'      => 1,
         'type'       => 'shop_order',
         'status'     => 'any',
-        'meta_query' => array(
-            array(
-                'key'   => '_rpsfw_stripe_subscription_id',
-                'value' => $subscription_id,
-            ),
-        ),
+        'meta_key'   => '_rpsfw_stripe_subscription_id', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+        'meta_value' => $subscription_id, // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
     ) );
     if ( ! empty( $orders ) ) {
         return $orders[0];
@@ -597,9 +587,11 @@ function rpsfw_stripe_find_order_via_invoice_subscription( $invoice_id ) {
 /**
  * Find a single WooCommerce order by a meta key/value.
  *
- * Uses a proper meta_query (not the meta_key/meta_value shorthand, which is
- * not reliably honored by wc_get_orders across storage backends) and status
- * 'any' so authorized/on-hold orders are matched too.
+ * Uses meta_key/meta_value, which both of WooCommerce's order storages honor.
+ * (meta_query is ignored by the classic posts storage, which then returns the
+ * newest order whatever the value.) The transaction id is a column, not meta,
+ * in the newer order tables, so it has its own query argument. Status 'any'
+ * so authorized/on-hold orders are matched too.
  *
  * @param string $key   Meta key.
  * @param string $value Meta value.
@@ -609,16 +601,17 @@ function rpsfw_stripe_find_order_by_meta( $key, $value ) {
     if ( '' === $value ) {
         return false;
     }
-    $orders = wc_get_orders( array(
-        'limit'      => 1,
-        'status'     => 'any',
-        'meta_query' => array(
-            array(
-                'key'   => $key,
-                'value' => $value,
-            ),
-        ),
-    ) );
+    $args = array(
+        'limit'  => 1,
+        'status' => 'any',
+    );
+    if ( '_transaction_id' === $key ) {
+        $args['transaction_id'] = $value;
+    } else {
+        $args['meta_key']   = $key; // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
+        $args['meta_value'] = $value; // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+    }
+    $orders = wc_get_orders( $args );
     return ! empty( $orders ) ? $orders[0] : false;
 }
 
