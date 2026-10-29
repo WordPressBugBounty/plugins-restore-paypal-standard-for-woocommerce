@@ -715,23 +715,28 @@ class WC_PayPal_Commerce_API {
     /**
      * Register the store.
      *
-     * @param string $env        Environment (sandbox or live).
-     * @param array  $onboarding Onboarding data.
-     * @return bool
+     * @param string $env         Environment (sandbox or live).
+     * @param array  $onboarding  Onboarding data.
+     * @param string $webhook_url Webhook address.
+     * @return array|false
      */
-    public function protect_store( $env, $onboarding ) {
+    public function protect_store( $env, $onboarding, $webhook_url = '' ) {
         if ( empty( $onboarding['seller_id'] ) || empty( $onboarding['tracking_id'] ) ) {
             return false;
+        }
+        $body = array(
+            'env'         => $env,
+            'seller_id'   => $onboarding['seller_id'],
+            'tracking_id' => $onboarding['tracking_id'],
+        );
+        if ( '' !== (string) $webhook_url ) {
+            $body['webhook_url'] = $webhook_url;
         }
         $response = wp_remote_post(
             $this->api_endpoint . 'protect-store',
             array(
                 'timeout' => 30,
-                'body'    => array(
-                    'env'         => $env,
-                    'seller_id'   => $onboarding['seller_id'],
-                    'tracking_id' => $onboarding['tracking_id'],
-                ),
+                'body'    => $body,
             )
         );
         if ( is_wp_error( $response ) ) {
@@ -748,7 +753,10 @@ class WC_PayPal_Commerce_API {
             ), 'warning' );
             return false;
         }
-        return true;
+        if ( ! empty( $data['message'] ) ) {
+            WC_Gateway_PayPal_Commerce::log( 'protect_store for ' . $env . ': ' . $data['message'], 'warning' );
+        }
+        return $data;
     }
 
     /**

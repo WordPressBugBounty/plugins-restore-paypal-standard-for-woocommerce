@@ -138,6 +138,21 @@ class WC_PayPal_Commerce_Webhooks {
 
         WC_Gateway_PayPal_Commerce::log( 'Webhook received: ' . $event['event_type'] . ' - ID: ' . $event['id'] );
 
+        // Passed on by wpplugin.org.
+        if ( isset( $_SERVER['HTTP_X_RPSFW_SIGNATURE'] ) ) {
+            $env  = isset( $_SERVER['HTTP_X_RPSFW_ENV'] ) ? sanitize_key( wp_unslash( $_SERVER['HTTP_X_RPSFW_ENV'] ) ) : '';
+            $mode = self::relay_delivery_mode( $raw_body, wp_unslash( $_SERVER['HTTP_X_RPSFW_SIGNATURE'] ), $env );
+            if ( '' === $mode ) {
+                WC_Gateway_PayPal_Commerce::log( 'Webhook from wpplugin.org ignored: its signature did not match.', 'warning' );
+                status_header( 401 );
+                exit;
+            }
+            rpsfw_current_webhook_mode( $mode );
+            $this->process_event( $event );
+            status_header( 200 );
+            exit;
+        }
+
         // Verify webhook signature.
         //   'valid'   => signature matches our account's webhook, process it.
         //   'invalid' => PayPal definitively rejected the signature. This is
@@ -169,12 +184,51 @@ class WC_PayPal_Commerce_Webhooks {
             exit;
         }
 
+        // Comes through wpplugin.org instead.
+        if ( '' !== self::relay_secret( rpsfw_payment_mode_to_ppcp_env( rpsfw_current_webhook_mode() ) ) ) {
+            status_header( 200 );
+            exit;
+        }
+
         // Process the event
         $this->process_event( $event );
 
         // Return 200 OK
         status_header( 200 );
         exit;
+    }
+
+    /**
+     * The mode of a notice passed on by wpplugin.org.
+     *
+     * @param string $raw_body  Raw POST body.
+     * @param string $signature X-RPSFW-Signature header.
+     * @param string $env       X-RPSFW-Env header.
+     * @return string 'live', 'test', or '' when the signature doesn't match.
+     */
+    public static function relay_delivery_mode( $raw_body, $signature, $env ) {
+        $secret = self::relay_secret( $env );
+        if ( '' === $secret || ! preg_match( '/^t=(\d{1,12}),v1=([a-f0-9]{64})$/', (string) $signature, $parts ) ) {
+            return '';
+        }
+        if ( abs( time() - (int) $parts[1] ) > 300 ) {
+            return '';
+        }
+        if ( ! hash_equals( hash_hmac( 'sha256', $parts[1] . '.' . $env . '.' . $raw_body, $secret ), $parts[2] ) ) {
+            return '';
+        }
+        return 'sandbox' === $env ? 'test' : 'live';
+    }
+
+    /**
+     * Secret for notices passed on by wpplugin.org.
+     *
+     * @param string $env 'sandbox' or 'live'.
+     * @return string
+     */
+    public static function relay_secret( $env ) {
+        $secrets = get_option( 'rpsfw_ppcp_relay_secret', array() );
+        return in_array( $env, array( 'sandbox', 'live' ), true ) && is_array( $secrets ) && ! empty( $secrets[ $env ] ) && is_string( $secrets[ $env ] ) ? $secrets[ $env ] : '';
     }
 
 

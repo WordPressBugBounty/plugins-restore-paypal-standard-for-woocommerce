@@ -1541,7 +1541,7 @@ class WC_Gateway_PayPal_Commerce extends WC_Payment_Gateway {
             : __( 'Live mode', 'restore-paypal-standard-for-woocommerce' );
 
         $connected   = ! empty( $onboarding[ $env ]['seller_id'] );
-        $has_webhook = ! empty( $this->get_option( 'webhook_id_' . $env ) );
+        $has_webhook = ! empty( $this->get_option( 'webhook_id_' . $env ) ) || '' !== WC_PayPal_Commerce_Webhooks::relay_secret( $env );
 
         // Connected and webhooked (or not connected at all): nothing to warn about.
         if ( ! $connected || $has_webhook ) {
@@ -1998,7 +1998,28 @@ class WC_Gateway_PayPal_Commerce extends WC_Payment_Gateway {
             return;
         }
         
-        if ( $webhook_status['configured'] ) {
+        if ( '' !== WC_PayPal_Commerce_Webhooks::relay_secret( $env ) ) {
+            ?>
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                <span class="dashicons dashicons-yes-alt" style="color: #46b450; font-size: 20px;"></span>
+                <div>
+                    <strong><?php esc_html_e( 'Webhook Configured', 'restore-paypal-standard-for-woocommerce' ); ?></strong>
+                    <p style="margin: 5px 0 0 0; color: #666;">
+                        <?php esc_html_e( 'PayPal notices reach this store through WPPlugin. Nothing to set up.', 'restore-paypal-standard-for-woocommerce' ); ?>
+                    </p>
+                </div>
+            </div>
+            <div style="margin-left: 30px; margin-bottom: 15px;">
+                <p style="margin: 0 0 10px 0; color: #666;">
+                    <strong><?php esc_html_e( 'Webhook URL:', 'restore-paypal-standard-for-woocommerce' ); ?></strong><br>
+                    <code style="font-size: 12px;"><?php echo esc_html( $webhook_status['url'] ); ?></code>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #666;">
+                    <strong><?php esc_html_e( 'Environment:', 'restore-paypal-standard-for-woocommerce' ); ?></strong> <?php echo esc_html( ucfirst( $env ) ); ?>
+                </p>
+            </div>
+            <?php
+        } elseif ( $webhook_status['configured'] ) {
             ?>
             <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
                 <span class="dashicons dashicons-yes-alt" style="color: #46b450; font-size: 20px;"></span>

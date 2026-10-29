@@ -16,7 +16,11 @@ class WC_PayPal_Commerce_Daily_Check {
 
 	const HOOK_CONTINUE = 'rpsfw_ppcp_daily_check_continue';
 
+	const HOOK_REGISTER = 'rpsfw_ppcp_register_store';
+
 	const GROUP = 'rpsfw';
+
+	const SECRET_OPTION = 'rpsfw_ppcp_relay_secret';
 
 	const META_CHECKED = '_rpsfw_ppcp_checked_at';
 
@@ -58,7 +62,49 @@ class WC_PayPal_Commerce_Daily_Check {
 	public static function init() {
 		add_action( self::HOOK, array( __CLASS__, 'run' ) );
 		add_action( self::HOOK_CONTINUE, array( __CLASS__, 'run' ) );
+		add_action( self::HOOK_REGISTER, array( __CLASS__, 'register' ) );
 		add_action( 'action_scheduler_init', array( __CLASS__, 'maybe_schedule' ) );
+		add_action( 'action_scheduler_init', array( __CLASS__, 'maybe_register' ) );
+	}
+
+	/**
+	 * Queue the store's registration.
+	 */
+	public static function maybe_register() {
+		if ( get_transient( 'rpsfw_ppcp_register_checked' ) ) {
+			return;
+		}
+		set_transient( 'rpsfw_ppcp_register_checked', 1, HOUR_IN_SECONDS );
+
+		$settings   = get_option( 'woocommerce_rpsfw_paypal_commerce_settings', array() );
+		$onboarding = is_array( $settings ) && isset( $settings['ppcp_onboarding'] ) && is_array( $settings['ppcp_onboarding'] ) ? $settings['ppcp_onboarding'] : array();
+		$done       = get_option( 'rpsfw_ppcp_store_protected', array() );
+		foreach ( array( 'live', 'sandbox' ) as $env ) {
+			if ( empty( $onboarding[ $env ]['seller_id'] ) || empty( $onboarding[ $env ]['tracking_id'] ) ) {
+				continue;
+			}
+			if ( isset( $done[ $env ]['url'], $done[ $env ]['seller_id'] ) && $done[ $env ]['seller_id'] === (string) $onboarding[ $env ]['seller_id'] ) {
+				continue;
+			}
+			if ( function_exists( 'as_enqueue_async_action' ) && false === as_next_scheduled_action( self::HOOK_REGISTER ) ) {
+				as_enqueue_async_action( self::HOOK_REGISTER, array(), self::GROUP );
+			}
+			return;
+		}
+	}
+
+	/**
+	 * Register the store.
+	 */
+	public static function register() {
+		$gateway = self::get_gateway();
+		if ( ! $gateway ) {
+			return;
+		}
+		$onboarding = $gateway->get_option( 'ppcp_onboarding', array() );
+		if ( is_array( $onboarding ) ) {
+			self::protect_store( $gateway, $onboarding );
+		}
 	}
 
 	/**
@@ -86,8 +132,10 @@ class WC_PayPal_Commerce_Daily_Check {
 		if ( function_exists( 'as_unschedule_all_actions' ) ) {
 			as_unschedule_all_actions( self::HOOK );
 			as_unschedule_all_actions( self::HOOK_CONTINUE );
+			as_unschedule_all_actions( self::HOOK_REGISTER );
 		}
 		delete_transient( 'rpsfw_ppcp_daily_check_scheduled' );
+		delete_transient( 'rpsfw_ppcp_register_checked' );
 	}
 
 	/**
@@ -176,27 +224,55 @@ class WC_PayPal_Commerce_Daily_Check {
 		if ( ! is_array( $done ) ) {
 			$done = array();
 		}
+		$secrets = get_option( self::SECRET_OPTION, array() );
+		if ( ! is_array( $secrets ) ) {
+			$secrets = array();
+		}
+		$url     = self::webhook_url();
 		$changed = false;
 		foreach ( array( 'live', 'sandbox' ) as $env ) {
 			if ( empty( $onboarding[ $env ]['seller_id'] ) || empty( $onboarding[ $env ]['tracking_id'] ) ) {
 				continue;
 			}
 			$seller_id = (string) $onboarding[ $env ]['seller_id'];
-			if ( isset( $done[ $env ]['seller_id'], $done[ $env ]['at'] ) && $done[ $env ]['seller_id'] === $seller_id
-				&& $done[ $env ]['at'] > time() - 30 * DAY_IN_SECONDS ) {
+			if ( isset( $done[ $env ]['seller_id'], $done[ $env ]['at'], $done[ $env ]['url'] ) && $done[ $env ]['seller_id'] === $seller_id
+				&& $done[ $env ]['url'] === $url && $done[ $env ]['at'] > time() - 30 * DAY_IN_SECONDS
+				&& ( '' === $url || ! empty( $secrets[ $env ] ) ) ) {
 				continue;
 			}
-			if ( $gateway->api->protect_store( $env, $onboarding[ $env ] ) ) {
-				$done[ $env ] = array(
-					'seller_id' => $seller_id,
-					'at'        => time(),
-				);
-				$changed      = true;
+			$result = $gateway->api->protect_store( $env, $onboarding[ $env ], $url );
+			if ( ! is_array( $result ) ) {
+				continue;
 			}
+			$done[ $env ] = array(
+				'seller_id' => $seller_id,
+				'at'        => time(),
+				'url'       => $url,
+			);
+			if ( ! empty( $result['secret'] ) && is_string( $result['secret'] ) ) {
+				$secrets[ $env ] = $result['secret'];
+			} else {
+				unset( $secrets[ $env ] );
+			}
+			$changed = true;
 		}
 		if ( $changed ) {
 			update_option( 'rpsfw_ppcp_store_protected', $done, false );
+			update_option( self::SECRET_OPTION, $secrets, true );
 		}
+	}
+
+	/**
+	 * Webhook address, or '' when there isn't one to give.
+	 *
+	 * @return string
+	 */
+	private static function webhook_url() {
+		if ( class_exists( 'WCS_Staging' ) && is_callable( array( 'WCS_Staging', 'is_duplicate_site' ) ) && WCS_Staging::is_duplicate_site() ) {
+			return '';
+		}
+		$url = (string) WC()->api_request_url( 'rpsfw_paypal_commerce_webhook' );
+		return 0 === strpos( $url, 'https://' ) ? $url : '';
 	}
 
 	/**
