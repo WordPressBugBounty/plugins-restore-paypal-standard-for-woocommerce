@@ -1390,6 +1390,9 @@ class WC_PayPal_Commerce_Subscriptions {
 			case 'BILLING.SUBSCRIPTION.ACTIVATED':
 				$this->webhook_subscription_activated( $resource );
 				break;
+			case 'BILLING.SUBSCRIPTION.EXPIRED':
+				$this->webhook_subscription_expired( $resource );
+				break;
 			case 'BILLING.SUBSCRIPTION.PAYMENT.FAILED':
 				$this->webhook_subscription_payment_failed( $resource );
 				break;
@@ -1418,12 +1421,13 @@ class WC_PayPal_Commerce_Subscriptions {
 		// order is created with transaction_id = the PayPal
 		// subscription id; the actual PAYMENT.SALE.COMPLETED comes in
 		// later. We detect "first sale" by checking whether the parent
-		// has had its initial sale id stored yet.
+		// has had its initial sale id stored yet, and the parent was not free.
 		$last_order = $wc_subscription->get_last_order();
 		$last_order_id = $last_order ? $last_order : 0;
 		$last_paypal_txn = $last_order_id ? wc_get_order( $last_order_id )->get_transaction_id() : '';
 		$is_first_sale_for_parent = $last_order_id
 			&& $last_paypal_txn === $paypal_subscription_id
+			&& (float) wc_get_order( $last_order_id )->get_total() > 0
 			&& ! wc_get_order( $last_order_id )->get_meta( self::META_LAST_PAYMENT_ID );
 
 		if ( $is_first_sale_for_parent ) {
@@ -1531,6 +1535,21 @@ class WC_PayPal_Commerce_Subscriptions {
 		remove_action( 'woocommerce_subscription_status_active', array( $this, 'reactivate_paypal_subscription' ) );
 		$wc_sub->update_status( 'active', __( 'PayPal reported subscription activated.', 'restore-paypal-standard-for-woocommerce' ) );
 		add_action( 'woocommerce_subscription_status_active', array( $this, 'reactivate_paypal_subscription' ) );
+	}
+
+	/**
+	 * Handle BILLING.SUBSCRIPTION.EXPIRED webhook.
+	 *
+	 * @param array $resource Subscription resource.
+	 */
+	private function webhook_subscription_expired( $resource ) {
+		$wc_sub = $this->find_wc_subscription_by_paypal_id( isset( $resource['id'] ) ? $resource['id'] : '' );
+		if ( ! $wc_sub || $wc_sub->has_status( array( 'cancelled', 'expired' ) ) ) {
+			return;
+		}
+		remove_action( 'woocommerce_subscription_status_expired', array( $this, 'cancel_paypal_subscription' ) );
+		$wc_sub->update_status( 'expired', __( 'PayPal reported subscription expired.', 'restore-paypal-standard-for-woocommerce' ) );
+		add_action( 'woocommerce_subscription_status_expired', array( $this, 'cancel_paypal_subscription' ) );
 	}
 
 	/**

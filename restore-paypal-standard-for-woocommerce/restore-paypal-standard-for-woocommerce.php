@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Accept PayPal & Stripe with Subscriptions for WooCommerce
  * Description: Accept PayPal and Stripe payments in WooCommerce. Includes built-in subscriptions and is also compatible with the WooCommerce Subscriptions plugin.
- * Version: 4.1.0
+ * Version: 4.1.1
  * Author: Scott Paterson
  * Author URI: https://wpplugin.org
  * Plugin URI: https://wpplugin.org
@@ -67,7 +67,7 @@ defined( 'ABSPATH' ) || exit;
 
 // Define plugin constants
 define( 'RPSFW_PLUGIN_NAME', 'Accept PayPal & Stripe with Subscriptions for WooCommerce' );
-define( 'RPSFW_VERSION', '4.1.0' );
+define( 'RPSFW_VERSION', '4.1.1' );
 define( 'RPSFW_PLUGIN_FILE', __FILE__ );
 define( 'RPSFW_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'RPSFW_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -121,6 +121,9 @@ require_once RPSFW_PLUGIN_DIR . 'includes/paypal-commerce/class-paypal-commerce-
 // Include PayPal Commerce Pay Later Messaging
 require_once RPSFW_PLUGIN_DIR . 'includes/paypal-commerce/class-paypal-commerce-pay-later-messaging.php';
 
+// Include the PayPal Commerce daily check
+require_once RPSFW_PLUGIN_DIR . 'includes/paypal-commerce/class-paypal-commerce-daily-check.php';
+
 // Include PayPal Commerce subscription diagnostic admin tool.
 // Disabled by default for the 4.0.0 release. Re-enable by uncommenting
 // the line below to expose the test under WooCommerce -> Status -> Tools.
@@ -131,6 +134,9 @@ rpsfw_register_hooks();
 
 // Register activation hook - this cannot be moved to a function
 register_activation_hook( __FILE__, 'rpsfw_activation_hook' );
+
+// Stop the PayPal Commerce daily check when the plugin is deactivated
+register_deactivation_hook( __FILE__, array( 'WC_PayPal_Commerce_Daily_Check', 'unschedule' ) );
 
 // Add admin notice
 add_action( 'admin_notices', 'rpsfw_admin_notice', 20 );

@@ -5,7 +5,7 @@ Tags: woocommerce, paypal, stripe, payment gateway, subscriptions
 Requires at least: 5.6
 Tested up to: 7.1
 Requires PHP: 5.6
-Stable tag: 4.1.0
+Stable tag: 4.1.1
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -138,6 +138,9 @@ We're here to help! Please create a support post in the [support forum](https://
 8. PayPal Pay Later Settings Page
 
 == Changelog ==
+
+= 4.1.1 =
+* Fix - PayPal webhook fix: subscription renewals and cancellations are now recorded even when PayPal's webhook notice doesn't reach the store
 
 = 4.1.0 =
 * New - Subscription coupons: "Fixed subscription discount" and "Percentage subscription discount" coupon types, with an optional "Number of payments to discount" limit (the same as WooCommerce Subscriptions' "Active for x payments"). Works with Stripe and PayPal, for built-in subscriptions and WooCommerce Subscriptions. With Stripe, the discounted payments and the full price after them are set up on Stripe at checkout, so Stripe switches to the full price on its own

@@ -667,6 +667,11 @@ class WC_PayPal_Commerce_API {
 
         WC_Gateway_PayPal_Commerce::log( 'Refund request: ' . print_r( $body_data, true ) );
 
+        // Not logged.
+        if ( ! empty( $onboarding['tracking_id'] ) ) {
+            $body_data['tracking_id'] = $onboarding['tracking_id'];
+        }
+
         $response = wp_remote_post(
             $this->api_endpoint . 'refund-capture',
             array(
@@ -705,6 +710,45 @@ class WC_PayPal_Commerce_API {
 
         WC_Gateway_PayPal_Commerce::log( 'Invalid refund response: ' . $body, 'error' );
         return false;
+    }
+
+    /**
+     * Register the store.
+     *
+     * @param string $env        Environment (sandbox or live).
+     * @param array  $onboarding Onboarding data.
+     * @return bool
+     */
+    public function protect_store( $env, $onboarding ) {
+        if ( empty( $onboarding['seller_id'] ) || empty( $onboarding['tracking_id'] ) ) {
+            return false;
+        }
+        $response = wp_remote_post(
+            $this->api_endpoint . 'protect-store',
+            array(
+                'timeout' => 30,
+                'body'    => array(
+                    'env'         => $env,
+                    'seller_id'   => $onboarding['seller_id'],
+                    'tracking_id' => $onboarding['tracking_id'],
+                ),
+            )
+        );
+        if ( is_wp_error( $response ) ) {
+            WC_Gateway_PayPal_Commerce::log( 'protect_store error: ' . $response->get_error_message(), 'error' );
+            return false;
+        }
+        $data = json_decode( wp_remote_retrieve_body( $response ), true );
+        if ( empty( $data['success'] ) ) {
+            WC_Gateway_PayPal_Commerce::log( sprintf(
+                'protect_store for %s not done (HTTP %d): %s',
+                $env,
+                wp_remote_retrieve_response_code( $response ),
+                is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'no answer'
+            ), 'warning' );
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -1176,6 +1220,45 @@ class WC_PayPal_Commerce_API {
         }
         $data = json_decode( wp_remote_retrieve_body( $response ), true );
         return is_array( $data ) ? $data : false;
+    }
+
+    /**
+     * List a subscription's transactions.
+     *
+     * @param string $env             Environment.
+     * @param array  $onboarding      Onboarding data.
+     * @param string $subscription_id PayPal subscription id.
+     * @param string $start_time      ISO 8601 UTC time.
+     * @param string $end_time        ISO 8601 UTC time.
+     * @return array|false
+     */
+    public function list_subscription_transactions( $env, $onboarding, $subscription_id, $start_time, $end_time ) {
+        if ( empty( $onboarding['seller_id'] ) || empty( $subscription_id ) ) {
+            return false;
+        }
+        $url = $this->api_endpoint . 'list-subscription-transactions?' . http_build_query( array(
+            'env'             => $env,
+            'seller_id'       => $onboarding['seller_id'],
+            'subscription_id' => $subscription_id,
+            'start_time'      => $start_time,
+            'end_time'        => $end_time,
+        ) );
+        $response = wp_remote_get( $url, array( 'timeout' => 30 ) );
+        if ( is_wp_error( $response ) ) {
+            WC_Gateway_PayPal_Commerce::log( 'list_subscription_transactions error: ' . $response->get_error_message(), 'error' );
+            return false;
+        }
+        $data = json_decode( wp_remote_retrieve_body( $response ), true );
+        if ( ! is_array( $data ) || empty( $data['success'] ) || ! isset( $data['transactions'] ) || ! is_array( $data['transactions'] ) ) {
+            WC_Gateway_PayPal_Commerce::log( sprintf(
+                'list_subscription_transactions for %s failed (HTTP %d): %s',
+                $subscription_id,
+                wp_remote_retrieve_response_code( $response ),
+                is_array( $data ) && ! empty( $data['message'] ) ? $data['message'] : 'no answer'
+            ), 'warning' );
+            return false;
+        }
+        return $data['transactions'];
     }
 
     /**
